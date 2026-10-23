@@ -1,0 +1,5 @@
+/api/apify/validate    /.netlify/functions/apify-validate    200
+/api/apify/scrape      /.netlify/functions/apify-scrape      200
+/api/generate          /.netlify/functions/generate          200
+/api/*                 /.netlify/functions/:splat            200
+/*                     /index.html                           200

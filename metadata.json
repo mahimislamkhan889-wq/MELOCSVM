@@ -1,0 +1,8 @@
+{
+  "name": "Melo",
+  "description": "Powerful AI-driven SEO Metadata Generator, Prompt Architect, and 2026 Stock Event Calendar for Microstock Platforms. Optimized for Adobe Stock, Shutterstock, and Freepik.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,56 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Stores user roles and permission status.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "builder", "user"] },
+        "hasAccess": { "type": "boolean" },
+        "totalFilesGenerated": { "type": "number" },
+        "workLimit": { "type": "number" },
+        "credits": { "type": "number", "description": "Current available user credits" },
+        "creditsUsed": { "type": "number", "description": "Cumulative credits spent on processing" },
+        "lastDailyBonusClaim": { "type": "number", "description": "Timestamp ms of last daily bonus claim" },
+        "claimedPromoCodes": { "type": "array", "items": { "type": "string" } },
+        "transactions": { "type": "array" },
+        "plan": { "type": "string", "enum": ["free", "starter", "pro", "unlimited"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid"]
+    },
+    "Review": {
+      "title": "Stock Contributor Review",
+      "description": "User reviews and testimonials for Melo stock metadata editor.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "badge": { "type": "string" },
+        "quote": { "type": "string" },
+        "rating": { "type": "number" },
+        "stats": { "type": "string" },
+        "initials": { "type": "string" },
+        "isVerified": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "role", "quote", "rating", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile and permission settings."
+    },
+    "/reviews/{reviewId}": {
+      "schema": "Review",
+      "description": "Contributor reviews and testimonials."
+    }
+  }
+}

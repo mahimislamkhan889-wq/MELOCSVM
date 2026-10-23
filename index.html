@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <script>
+      (function() {
+        try {
+          if (typeof window !== 'undefined' && window.fetch) {
+            var origFetch = window.fetch.bind(window);
+            Object.defineProperty(window, 'fetch', {
+              get: function() { return origFetch; },
+              set: function(v) { origFetch = typeof v === 'function' ? v.bind(window) : v; },
+              configurable: true,
+              enumerable: true
+            });
+          }
+        } catch (e) {
+          // ignore
+        }
+      })();
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' fill='none'><rect width='32' height='32' rx='8' fill='%23121316'/><g transform='translate(4,4)' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M13 16a3 3 0 0 1 2.24 5'/><path d='M18 12h.01'/><path d='M18 21h-8a4 4 0 0 1-4-4 7 7 0 0 1 7-7h.2L9.6 6.4a1 1 0 1 1 2.8-2.8L15.8 7h.2c3.3 0 6 2.7 6 6v1a2 2 0 0 1-2 2h-1a3 3 0 0 0-3 3'/><path d='M20 8.54V4a2 2 0 1 0-4 0v3'/><path d='M7.612 12.524a3 3 0 1 0-1.6 4.3'/></g></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <title>Melo | Pro Microstock SEO Generator</title>
+    <meta name="description" content="Powerful AI-driven SEO Metadata Generator, Prompt Architect, and 2026 Stock Event Calendar for Microstock Platforms. Optimized for Adobe Stock, Shutterstock, and Freepik." />
+    <meta name="keywords" content="microstock seo, image to prompt, shutterstock metadata, adobe stock seo, freepik metadata generator, ai prompt architect, stock event calendar 2026, stock photography keywords, microstock contributor tools" />
+    <meta name="author" content="Mainul" />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
+
+    <!-- OpenGraph Social Cards -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Melo" />
+    <meta property="og:title" content="Melo | Pro Microstock SEO Generator" />
+    <meta property="og:description" content="Powerful AI-driven SEO Metadata Generator, Prompt Architect, and 2026 Stock Event Calendar for Microstock Platforms. Optimized for Adobe Stock, Shutterstock, and Freepik." />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- Twitter / X Social Cards -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Melo | Pro Microstock SEO Generator" />
+    <meta name="twitter:description" content="Powerful AI-driven SEO Metadata Generator, Prompt Architect, and 2026 Stock Event Calendar for Microstock Platforms. Optimized for Adobe Stock, Shutterstock, and Freepik." />
+
+    <!-- Schema.org JSON-LD Structured Data for 100% SEO Rich Snippets -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "Melo",
+      "alternateName": "Melo Pro Microstock SEO Generator",
+      "applicationCategory": "MultimediaApplication, DesignApplication, BusinessApplication",
+      "operatingSystem": "All",
+      "description": "Powerful AI-driven SEO Metadata Generator, Prompt Architect, and 2026 Stock Event Calendar for Microstock Platforms. Optimized for Adobe Stock, Shutterstock, and Freepik.",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "featureList": [
+        "AI SEO Title & Keyword Generation for Adobe Stock, Shutterstock, and Freepik",
+        "Reverse Image to AI Prompt Architect for Midjourney, FLUX, and DALL-E",
+        "2026 Commercial Stock Event Calendar with 770+ Global Observances",
+        "Multi-format Vector & Raster Analysis (JPEG, PNG, WebP, SVG, EPS, AI)",
+        "Instant Bulk CSV Export with Platform-Specific Formatting",
+        "High-speed Zero-Latency Gemini Vision Processing"
+      ]
+    }
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

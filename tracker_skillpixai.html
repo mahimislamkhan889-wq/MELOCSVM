@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SKILL ITBD Tracker</title>
+    <meta name="description" content="Search Adobe Stock keywords and contributor portfolios with live download data." />
+    <link rel="icon" href="/images/favicon-32.png" type="image/png" sizes="32x32" />
+    <link rel="icon" href="/images/favicon-192.png" type="image/png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="/images/apple-touch-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <script src="/js/theme.js"></script>
+    <script src="/js/site.js"></script>
+    <link rel="stylesheet" href="/css/tokens.css" />
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/app.css" />
+  </head>
+  <body class="app auth-pending">
+    <!-- ================= Top bar ================= -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <a class="brand" href="/" aria-label="SKILL ITBD Tracker home">
+          <img class="brand-logo" src="/images/logo.png" alt="" />
+          <span class="wordmark"><span class="skill">SKILL</span> <span class="itbd">ITBD</span></span>
+          <span class="brand-tag">Tracker</span>
+        </a>
+        <button class="icon-btn" type="button" id="sidebarToggle" aria-label="Collapse panel" aria-controls="sidebar">
+          <svg class="icon icon-sm"><use href="/icons.svg#panel-close" /></svg>
+        </button>
+      </div>
+      <div class="topbar-right">
+        <a class="btn btn-cyan credit-btn" href="#/settings" title="Your credits">
+          <svg class="icon icon-sm"><use href="/icons.svg#zap" /></svg>
+          <b class="tnum" data-credits>—</b><span class="credit-word">credits</span>
+        </a>
+        <div class="popover-wrap" id="contactWrap" hidden>
+          <button class="btn btn-danger" type="button" id="contactBtn" aria-haspopup="true" aria-expanded="false">
+            <svg class="icon icon-sm"><use href="/icons.svg#message" /></svg><span class="hide-sm">Contact</span>
+          </button>
+          <div class="menu" id="contactMenu" role="menu" hidden></div>
+        </div>
+        <button class="icon-btn" type="button" data-theme-switch aria-label="Switch theme"><svg class="icon icon-sm"><use href="/icons.svg#sun" /></svg></button>
+        <div class="popover-wrap">
+          <button class="btn btn-primary user-btn" type="button" id="userBtn" aria-haspopup="true" aria-expanded="false">
+            <svg class="icon icon-sm"><use href="/icons.svg#user" /></svg>
+            <span class="user-name" data-username></span>
+            <svg class="icon icon-xs"><use href="/icons.svg#chevron-down" /></svg>
+          </button>
+          <div class="menu" id="userMenu" role="menu" hidden>
+            <a role="menuitem" href="#/settings"><svg class="icon icon-sm"><use href="/icons.svg#settings" /></svg>Settings</a>
+            <a role="menuitem" href="#/settings" data-focus-key><svg class="icon icon-sm"><use href="/icons.svg#key" /></svg>Apify API key</a>
+            <button role="menuitem" type="button" data-action-signout class="danger"><svg class="icon icon-sm"><use href="/icons.svg#log-out" /></svg>Sign out</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="layout">
+      <!-- ================= Left panel ================= -->
+      <aside class="sidebar" id="sidebar" aria-label="Controls">
+        <section class="side-sec" data-sec="mode">
+          <button class="side-head" type="button" aria-expanded="true">
+            <h3>Mode Selection</h3>
+            <svg class="icon icon-sm chev"><use href="/icons.svg#chevron-down" /></svg>
+          </button>
+          <nav class="side-body mode-grid" aria-label="Tracker">
+            <a class="mode-tile" href="#/search" data-route="search"><svg class="icon icon-sm"><use href="/icons.svg#trend" /></svg><span>Keywords</span></a>
+            <a class="mode-tile" href="#/portfolio" data-route="portfolio"><svg class="icon icon-sm"><use href="/icons.svg#user" /></svg><span>Portfolio</span></a>
+            <a class="mode-tile" href="#/saved" data-route="saved"><svg class="icon icon-sm"><use href="/icons.svg#bookmark" /></svg><span>Saved</span><em class="nav-count tnum" id="savedCount" hidden></em></a>
+            <a class="mode-tile" href="#/settings" data-route="settings"><svg class="icon icon-sm"><use href="/icons.svg#settings" /></svg><span>Settings</span></a>
+          </nav>
+        </section>
+
+        <section class="side-sec" data-sec="scan" id="scanOptions">
+          <button class="side-head" type="button" aria-expanded="true">
+            <h3>Scan Options</h3>
+            <svg class="icon icon-sm chev"><use href="/icons.svg#chevron-down" /></svg>
+          </button>
+          <div class="side-body">
+            <div class="ctl">
+              <div class="ctl-head">
+                <label for="optSort">Order</label>
+              </div>
+              <select class="select select-sm" id="optSort"></select>
+            </div>
+            <div class="ctl">
+              <div class="ctl-head">
+                <label for="optLimit">Assets per scan</label>
+                <span class="ctl-val tnum" id="optLimitVal">100</span>
+              </div>
+              <input class="range" id="optLimit" type="range" min="0" max="3" step="1" value="2" />
+              <div class="ctl-ticks tnum" id="optLimitTicks"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="side-sec" data-sec="settings">
+          <button class="side-head settings-head" type="button" aria-expanded="true">
+            <span class="settings-title"><svg class="icon"><use href="/icons.svg#settings" /></svg><h2>SETTINGS</h2></span>
+            <svg class="icon icon-sm chev"><use href="/icons.svg#chevron-down" /></svg>
+          </button>
+          <div class="side-body">
+            <label class="toggle-row">
+              <span class="toggle-label">Hide AI assets <svg class="icon icon-xs muted" aria-hidden="true"><use href="/icons.svg#info" /></svg></span>
+              <span class="switch"><input type="checkbox" data-pref="hideAI" aria-label="Hide AI assets" /><span></span></span>
+            </label>
+            <label class="toggle-row">
+              <span class="toggle-label">Light theme</span>
+              <span class="switch"><input type="checkbox" id="lightSwitch" aria-label="Light theme" /><span></span></span>
+            </label>
+          </div>
+        </section>
+
+        <section class="side-sec side-recent grow" id="sideRecent" hidden></section>
+
+        <div class="side-foot">
+          <a class="credit-card" href="#/settings" title="Your credits">
+            <span class="credit-top">
+              <span class="credit-label"><svg class="icon icon-xs"><use href="/icons.svg#zap" /></svg>Credits</span>
+              <span class="credit-expiry" data-credit-expiry></span>
+            </span>
+            <span class="credit-value tnum" data-credits>—</span>
+            <span class="key-status" data-apify-status><span class="dot"></span><span class="key-status-text">Apify not connected</span></span>
+          </a>
+        </div>
+      </aside>
+      <div class="scrim" id="sidebarScrim" hidden></div>
+
+      <!-- ================= Canvas ================= -->
+      <main class="main" id="main">
+        <!-- Keyword search -->
+        <section class="view" data-view="search" hidden>
+          <div class="type-block">
+            <p class="eyebrow">Asset type</p>
+            <div class="type-bar" data-filter="type" role="group" aria-label="Asset type"></div>
+          </div>
+          <div class="hero glow-frame animate">
+            <form class="glow-inner hero-inner" id="searchForm" autocomplete="off">
+              <span class="hero-icon"><svg class="icon icon-lg"><use href="/icons.svg#trend" /></svg></span>
+              <h1 class="hero-title">Keyword Research</h1>
+              <p class="hero-sub">Scan Adobe Stock for any keyword and see what actually sells.</p>
+              <div class="hero-row">
+                <div class="input-group grow">
+                  <svg class="icon"><use href="/icons.svg#search" /></svg>
+                  <input class="input input-xl" id="searchInput" name="q" type="search" placeholder="Keyword, phrase, or contributor ID" aria-label="Keyword" maxlength="120" />
+                </div>
+                <button class="btn btn-primary btn-pill btn-lg" type="submit" id="searchBtn">
+                  <svg class="icon icon-sm"><use href="/icons.svg#scan" /></svg><span>Scan</span>
+                </button>
+              </div>
+              <p class="hero-foot"><svg class="icon icon-xs"><use href="/icons.svg#lock" /></svg>Scans run on your own Apify account. Press <kbd>/</kbd> to search.</p>
+            </form>
+          </div>
+          <div class="results" id="searchResults"></div>
+        </section>
+
+        <!-- Portfolio -->
+        <section class="view" data-view="portfolio" hidden>
+          <div class="type-block">
+            <p class="eyebrow">Asset type</p>
+            <div class="type-bar" data-filter="type" role="group" aria-label="Asset type"></div>
+          </div>
+          <div class="hero glow-frame animate">
+            <form class="glow-inner hero-inner" id="portfolioForm" autocomplete="off">
+              <span class="hero-icon"><svg class="icon icon-lg"><use href="/icons.svg#user" /></svg></span>
+              <h1 class="hero-title">Portfolio Tracker</h1>
+              <p class="hero-sub">Track any Adobe Stock contributor: best sellers, content mix and keywords.</p>
+              <div class="hero-row">
+                <div class="input-group grow">
+                  <svg class="icon"><use href="/icons.svg#user" /></svg>
+                  <input class="input input-xl" id="portfolioInput" name="id" inputmode="numeric" placeholder="Contributor ID, e.g. 200792199" aria-label="Contributor ID" maxlength="20" />
+                </div>
+                <button class="btn btn-primary btn-pill btn-lg" type="submit" id="portfolioBtn">
+                  <svg class="icon icon-sm"><use href="/icons.svg#scan" /></svg><span>Track</span>
+                </button>
+              </div>
+              <p class="hero-foot"><svg class="icon icon-xs"><use href="/icons.svg#info" /></svg>The number after <span class="mono">creator_id=</span> in a contributor’s Adobe Stock URL.</p>
+            </form>
+          </div>
+          <div class="results" id="portfolioResults"></div>
+        </section>
+
+        <!-- Saved -->
+        <section class="view" data-view="saved" hidden>
+          <div class="page-head">
+            <p class="eyebrow">Saved</p>
+            <h1>Contributors &amp; bookmarks</h1>
+          </div>
+          <div id="savedContent"></div>
+        </section>
+
+        <!-- Settings -->
+        <section class="view" data-view="settings" hidden>
+          <div class="page-head">
+            <p class="eyebrow">Settings</p>
+            <h1>Your account</h1>
+          </div>
+          <div class="settings">
+            <section class="settings-group card">
+              <div class="settings-row">
+                <div>
+                  <h3>Account</h3>
+                  <p class="account-line">Signed in as <b data-username></b><span data-account-detail></span></p>
+                </div>
+                <button class="btn btn-sm" type="button" data-action-signout><svg class="icon icon-sm"><use href="/icons.svg#log-out" /></svg>Sign out</button>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <h3>Credits</h3>
+                  <p class="account-line"><span data-credit-expiry-long></span></p>
+                </div>
+                <span class="credit-pill big"><svg class="icon icon-sm"><use href="/icons.svg#zap" /></svg><b class="tnum" data-credits>—</b></span>
+              </div>
+            </section>
+
+            <section class="settings-group card" id="apify">
+              <div class="settings-row">
+                <div>
+                  <h3>Apify API key</h3>
+                  <p class="account-line">Scans run on your own Apify account. <a class="link-btn" href="https://console.apify.com/settings/integrations" target="_blank" rel="noopener" data-apify-link>Get your API key</a></p>
+                </div>
+                <span class="key-status" data-apify-status><span class="dot"></span><span class="key-status-text">Not connected</span></span>
+              </div>
+              <div class="settings-body">
+                <form class="key-form" id="apifyKeyForm" autocomplete="off">
+                  <input type="text" name="username" autocomplete="username" hidden />
+                  <div class="input-group grow">
+                    <svg class="icon icon-sm"><use href="/icons.svg#key" /></svg>
+                    <input class="input mono" id="apifyKeyInput" type="password" placeholder="apify_api_…" spellcheck="false" autocomplete="new-password" aria-label="Apify API key" />
+                    <button class="icon-btn input-action" type="button" id="apifyKeyReveal" aria-label="Show key"><svg class="icon icon-sm"><use href="/icons.svg#eye" /></svg></button>
+                  </div>
+                  <button class="btn btn-primary" type="submit" id="apifyKeySave">Save key</button>
+                  <button class="btn btn-ghost danger" type="button" id="apifyKeyRemove" hidden>Remove</button>
+                </form>
+                <p class="hint">Your key is checked with Apify, then stored encrypted. It is never shown again.</p>
+              </div>
+            </section>
+
+            <section class="settings-group card">
+              <div class="settings-row">
+                <div>
+                  <h3>Appearance</h3>
+                </div>
+                <div class="segmented" data-theme-toggle role="group" aria-label="Theme">
+                  <button type="button" data-value="dark"><svg class="icon icon-sm"><use href="/icons.svg#moon" /></svg>Dark</button>
+                  <button type="button" data-value="light"><svg class="icon icon-sm"><use href="/icons.svg#sun" /></svg>Light</button>
+                </div>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <h3>Default scan size</h3>
+                  <p class="account-line">Assets per keyword scan.</p>
+                </div>
+                <select class="select select-sm fit" id="defaultLimit">
+                  <option value="24">24 assets</option>
+                  <option value="48">48 assets</option>
+                  <option value="100">100 assets</option>
+                  <option value="200">200 assets</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <div>
+                  <h3>Hide AI assets</h3>
+                  <p class="account-line">Leave AI-generated assets out of results.</p>
+                </div>
+                <label class="switch">
+                  <input type="checkbox" data-pref="hideAI" aria-label="Hide AI assets" />
+                  <span></span>
+                </label>
+              </div>
+            </section>
+
+            <section class="settings-group card">
+              <div class="settings-row">
+                <div>
+                  <h3>Local data</h3>
+                  <p class="account-line">Recent searches, saved contributors and bookmarks are kept in this browser.</p>
+                </div>
+                <div class="btn-row">
+                  <button class="btn btn-sm" type="button" id="clearRecent">Clear recent</button>
+                  <button class="btn btn-sm btn-ghost danger" type="button" id="clearAll"><svg class="icon icon-sm"><use href="/icons.svg#trash" /></svg>Clear everything</button>
+                </div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- Asset detail drawer -->
+    <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+    <aside class="drawer" id="drawer" aria-hidden="true" aria-label="Asset details" tabindex="-1">
+      <div class="drawer-inner" id="drawerBody"></div>
+    </aside>
+
+    <div class="toast-stack" id="toasts" aria-live="polite"></div>
+
+    <script src="/js/app.js"></script>
+  </body>
+</html>
