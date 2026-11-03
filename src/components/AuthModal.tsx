@@ -27,7 +27,8 @@ import {
   updateProfile,
   RecaptchaVerifier, 
   ConfirmationResult, 
-  User as FirebaseUser
+  User as FirebaseUser,
+  getAdditionalUserInfo
 } from 'firebase/auth';
 import { auth, db } from '../lib/firebase';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
@@ -150,13 +151,27 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
     try {
       const provider = new GoogleAuthProvider();
+      provider.addScope('email');
+      provider.addScope('profile');
+      provider.addScope('openid');
       provider.setCustomParameters({ prompt: 'select_account' });
+
       const result = await signInWithPopup(auth, provider);
       const googleUser = result.user;
+      const additionalInfo = getAdditionalUserInfo(result);
       
+      // Exhaustively extract verified Google account email directly from OAuth token and profile
+      const collectedEmail = 
+        googleUser.email || 
+        (additionalInfo?.profile as any)?.email || 
+        (result as any)._tokenResponse?.email || 
+        googleUser.providerData?.find((p: any) => p && p.email && p.email.includes('@'))?.email || 
+        googleUser.providerData?.[0]?.email || 
+        '';
+
       // Instantly collect all user details (Gmail, name, photo, role) into Firestore on login
-      const syncedUser = await syncUserOnLogin(googleUser);
-      const cleanName = syncedUser?.displayName || googleUser.displayName || 'Contributor';
+      const syncedUser = await syncUserOnLogin(googleUser, collectedEmail);
+      const cleanName = syncedUser?.displayName || (additionalInfo?.profile as any)?.name || googleUser.displayName || 'Contributor';
       
       handleAuthSuccess(syncedUser || googleUser, cleanName);
     } catch (err: any) {
@@ -183,6 +198,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setSuccessMessage(null);
     try {
       const provider = new GoogleAuthProvider();
+      provider.addScope('email');
+      provider.addScope('profile');
+      provider.addScope('openid');
       provider.setCustomParameters({ prompt: 'select_account' });
       await signInWithRedirect(auth, provider);
     } catch (err: any) {

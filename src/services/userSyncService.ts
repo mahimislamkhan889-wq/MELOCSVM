@@ -28,7 +28,7 @@ export interface SyncedUserProfile {
  * Instantly collects and syncs user details (Gmail, name, photo, phone, role)
  * into Firestore at the exact moment of login.
  */
-export async function syncUserOnLogin(authUser: any): Promise<SyncedUserProfile | null> {
+export async function syncUserOnLogin(authUser: any, overrideEmail?: string): Promise<SyncedUserProfile | null> {
   if (!authUser || authUser.isAnonymous) {
     return null;
   }
@@ -47,10 +47,11 @@ export async function syncUserOnLogin(authUser: any): Promise<SyncedUserProfile 
     console.warn('userSyncService: Error fetching existing user doc:', err);
   }
 
-  // 2. Extract authentic Email and Gmail from all available provider data
+  // 2. Extract authentic Email and Gmail from all available provider data or override
   const providerList = authUser.providerData || [];
   const providerEmailMatch = providerList.find((p: any) => p && p.email && p.email.includes('@'));
-  const rawEmail = authUser.email || 
+  const rawEmail = overrideEmail || 
+    authUser.email || 
     providerEmailMatch?.email || 
     providerList[0]?.email || 
     (existingDoc?.email && existingDoc.email !== 'Authenticated User' && existingDoc.email.includes('@') ? existingDoc.email : '') || 

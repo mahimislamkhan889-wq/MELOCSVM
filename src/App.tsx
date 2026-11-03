@@ -7,7 +7,7 @@ import { Phone, ArrowRight, X, Moon, Sun, Camera, Lock } from 'lucide-react';
 
 
 import { db, auth } from './lib/firebase';
-import { onAuthStateChanged, signOut, getRedirectResult, updateProfile, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signOut, getRedirectResult, updateProfile, User as FirebaseUser, getAdditionalUserInfo } from 'firebase/auth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
@@ -139,8 +139,17 @@ export default function App() {
     // Check if user is returning from a Google redirect sign-in
     getRedirectResult(auth).then(async (result) => {
       if (result && result.user) {
+        const additionalInfo = getAdditionalUserInfo(result);
+        const collectedEmail = 
+          result.user.email || 
+          (additionalInfo?.profile as any)?.email || 
+          (result as any)._tokenResponse?.email || 
+          result.user.providerData?.find((p: any) => p && p.email && p.email.includes('@'))?.email || 
+          result.user.providerData?.[0]?.email || 
+          '';
+
         // Collect full user credentials immediately upon return from redirect
-        const synced = await syncUserOnLogin(result.user);
+        const synced = await syncUserOnLogin(result.user, collectedEmail);
         if (synced) {
           setCurrentUser(synced);
           try {
