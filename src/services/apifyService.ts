@@ -329,7 +329,7 @@ export async function validateApifyToken(inputToken?: string): Promise<ApifyVali
 }
 
 /**
- * Common commercial microstock keywords database for tag enrichment
+ * Common high-performing microstock keywords database for tag enrichment
  */
 const STOCK_KEYWORD_DICTIONARY: Record<string, string[]> = {
   vector: [

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { Download, UploadCloud, FileImage, Settings, Image as ImageIcon, Tags, Tag, Zap, Trash2, CheckCircle2, AlertCircle, LogOut, User, ShieldCheck, Key, ChevronDown, ChevronUp, Cpu, Bot, RefreshCw, Copy, Check, Eye, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, Maximize2, Video, FileCode2, FileType2, Target, Rabbit, Sparkles, CalendarDays, Play, Clock, TrendingUp } from 'lucide-react';
+import { Download, UploadCloud, FileImage, Settings, Image as ImageIcon, Tags, Tag, Zap, Trash2, CheckCircle2, AlertCircle, LogOut, User, ShieldCheck, Key, ChevronDown, ChevronUp, Cpu, Bot, RefreshCw, Copy, Check, Eye, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, Maximize2, Video, FileCode2, FileType2, Target, Rabbit, Sparkles, CalendarDays, Play, Clock, TrendingUp, Pencil } from 'lucide-react';
 import { AppMode, Platform, GenerationSettings, GeneratedResult, processMedia } from './services/geminiService';
 import { cn, exportToCSV, generateId } from './lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -113,13 +113,17 @@ export default function App() {
     if (uid) {
       try {
         const userDocRef = doc(db, 'users', uid);
-        await setDoc(userDocRef, { photoURL: newPhotoURL, updatedAt: serverTimestamp() }, { merge: true });
+        await setDoc(userDocRef, { 
+          photoURL: newPhotoURL, 
+          profilePic: newPhotoURL, 
+          updatedAt: serverTimestamp() 
+        }, { merge: true });
       } catch (err) {
         console.warn('Firestore avatar update notice:', err);
       }
     }
     setCurrentUser((prev: any) => {
-      const updated = { ...(prev || {}), photoURL: newPhotoURL };
+      const updated = { ...(prev || {}), photoURL: newPhotoURL, profilePic: newPhotoURL };
       try {
         localStorage.setItem('melo_creator_auth', JSON.stringify(updated));
       } catch {}
@@ -421,6 +425,21 @@ export default function App() {
     setElapsedTime(0);
     setLastProcessingTime(null);
     sessionStartTimeRef.current = null;
+  };
+
+  const handleUpdateFileResult = (fileId: string, updates: Partial<GeneratedResult>) => {
+    setFiles(prev => prev.map(f => {
+      if (f.id === fileId && f.result) {
+        return {
+          ...f,
+          result: {
+            ...f.result,
+            ...updates
+          }
+        };
+      }
+      return f;
+    }));
   };
 
   const processBatch = async (itemsToProcess: MediaFile[], useSettings?: GenerationSettings) => {
@@ -1824,10 +1843,10 @@ export default function App() {
                                       tab === 'prompt' ? (
                                         <>
                                           <div className="space-y-3.5">
-                                            {/* The Main Prompt Text */}
-                                            <p className="text-zinc-800 dark:text-zinc-200 text-sm md:text-[15px] font-normal leading-relaxed tracking-normal select-text">
-                                              {file.result.prompt?.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim() || ''}
-                                            </p>
+                                            <EditablePromptCard
+                                              value={file.result.prompt?.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim() || ''}
+                                              onSave={(newPrompt) => handleUpdateFileResult(file.id, { prompt: newPrompt })}
+                                            />
                                           </div>
 
                                           {/* Bottom Action Buttons */}
@@ -1868,59 +1887,32 @@ export default function App() {
                                             {settings.platform !== 'shutterstock' && (file.result.title || file.result.description) && (() => {
                                               const safeTitle = (file.result.title || file.result.description || '').replace(/[\.\,\;\:\!\?\-]+$/, '').trim();
                                               return (
-                                                <div className="space-y-1">
-                                                  <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest flex justify-between items-center">
-                                                    <span>
-                                                      Title ({safeTitle.length} Chars • {safeTitle.split(/\s+/).filter(Boolean).length} Words)
-                                                    </span>
-                                                    <CopyButton text={safeTitle} />
-                                                  </div>
-                                                  <div className="bg-[#ECEEF4] dark:bg-[#1A202F] p-3 rounded-lg border border-zinc-300/60 dark:border-white/10">
-                                                    <p className="text-zinc-800 dark:text-zinc-200 text-xs font-semibold">
-                                                      {safeTitle}
-                                                    </p>
-                                                  </div>
-                                                </div>
+                                                <EditableCardField
+                                                  label="Title"
+                                                  badgeText={`${safeTitle.length} Chars • ${safeTitle.split(/\s+/).filter(Boolean).length} Words`}
+                                                  value={safeTitle}
+                                                  onSave={(newTitle) => handleUpdateFileResult(file.id, { title: newTitle })}
+                                                />
                                               );
                                             })()}
 
                                             {/* Description: Shown for Shutterstock and General */}
                                             {(settings.platform === 'shutterstock' || settings.platform === 'general') && (file.result.description || file.result.title) && (
-                                              <div className="space-y-1">
-                                                <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest flex justify-between items-center">
-                                                  <span>
-                                                    Description ({(file.result.description || file.result.title || '').length} Chars)
-                                                  </span>
-                                                  <CopyButton text={file.result.description || file.result.title || ''} />
-                                                </div>
-                                                <div className="bg-[#ECEEF4] dark:bg-[#1A202F] p-3 rounded-lg border border-zinc-300/60 dark:border-white/10">
-                                                  <p className="text-zinc-800 dark:text-zinc-200 text-xs font-semibold leading-relaxed">
-                                                    {file.result.description || file.result.title}
-                                                  </p>
-                                                </div>
-                                              </div>
+                                              <EditableCardField
+                                                label="Description"
+                                                badgeText={`${(file.result.description || file.result.title || '').length} Chars`}
+                                                value={file.result.description || file.result.title || ''}
+                                                multiline
+                                                onSave={(newDesc) => handleUpdateFileResult(file.id, { description: newDesc })}
+                                              />
                                             )}
 
                                             {/* Keywords: Shown for all platforms */}
                                             {file.result.keywords && (
-                                              <div className="space-y-1">
-                                                <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest flex justify-between items-center">
-                                                  <span>
-                                                    Keywords ({file.result.keywords.split(',').filter(Boolean).length} Tags)
-                                                  </span>
-                                                  <CopyButton text={file.result.keywords} />
-                                                </div>
-                                                <div className="flex flex-wrap gap-1.5 bg-[#ECEEF4] dark:bg-[#1A202F] p-3 rounded-lg border border-zinc-300/60 dark:border-white/10 max-h-32 overflow-y-auto">
-                                                  {file.result.keywords.split(',').map((kw, idx) => (
-                                                    <span
-                                                      key={idx}
-                                                      className="px-2 py-0.5 text-[11px] rounded border transition-colors bg-[#D5D9E2] dark:bg-[#22293C] text-zinc-700 dark:text-zinc-300 border-zinc-300/50 dark:border-white/5"
-                                                    >
-                                                      {kw.trim()}
-                                                    </span>
-                                                  ))}
-                                                </div>
-                                              </div>
+                                              <EditableKeywordsField
+                                                value={file.result.keywords}
+                                                onSave={(newKw) => handleUpdateFileResult(file.id, { keywords: newKw })}
+                                              />
                                             )}
                                           </div>
 
@@ -2287,6 +2279,320 @@ function CopyButton({ text }: { text: string }) {
         <><Copy size={14} strokeWidth={3} /> Copy</>
       )}
     </button>
+  );
+}
+
+// Reusable Editable Field for Title and Description
+function EditableCardField({
+  label,
+  value,
+  onSave,
+  multiline = false,
+  badgeText
+}: {
+  label: string;
+  value: string;
+  onSave: (val: string) => void;
+  multiline?: boolean;
+  badgeText?: string;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [isJustSaved, setIsJustSaved] = useState(false);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const handleCommit = () => {
+    onSave(draft.trim());
+    setIsEditing(false);
+    setIsJustSaved(true);
+    setTimeout(() => setIsJustSaved(false), 2000);
+  };
+
+  const handleCancel = () => {
+    setDraft(value);
+    setIsEditing(false);
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest flex justify-between items-center">
+        <span className="flex items-center gap-1.5">
+          {label} {badgeText && <span>({badgeText})</span>}
+          {isJustSaved && (
+            <span className="text-[9px] font-sans font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+              <Check size={10} strokeWidth={3} /> Saved
+            </span>
+          )}
+        </span>
+        <div className="flex items-center gap-1.5">
+          {!isEditing ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsEditing(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-500 hover:text-zinc-900 dark:hover:text-white bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                title="Edit this field"
+              >
+                <Pencil size={10} />
+                <span>Edit</span>
+              </button>
+              <CopyButton text={value} />
+            </>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="px-2 py-0.5 rounded text-[10px] font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCommit}
+                className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+              >
+                <Check size={11} strokeWidth={3} />
+                <span>Save</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-[#ECEEF4] dark:bg-[#1A202F] p-3 rounded-lg border border-zinc-300/60 dark:border-white/10 transition-all">
+        {isEditing ? (
+          multiline ? (
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={3}
+              className="w-full bg-white dark:bg-black/30 border border-emerald-500/50 rounded-md p-2 text-xs text-zinc-900 dark:text-white focus:outline-hidden font-normal leading-relaxed resize-y"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                  handleCommit();
+                } else if (e.key === 'Escape') {
+                  handleCancel();
+                }
+              }}
+            />
+          ) : (
+            <input
+              autoFocus
+              type="text"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              className="w-full bg-white dark:bg-black/30 border border-emerald-500/50 rounded-md px-2.5 py-1.5 text-xs text-zinc-900 dark:text-white focus:outline-hidden font-semibold"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleCommit();
+                else if (e.key === 'Escape') handleCancel();
+              }}
+            />
+          )
+        ) : (
+          <p className="text-zinc-800 dark:text-zinc-200 text-xs font-semibold leading-relaxed">
+            {value}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Reusable Editable Field for Keywords
+function EditableKeywordsField({
+  value,
+  onSave
+}: {
+  value: string;
+  onSave: (val: string) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [isJustSaved, setIsJustSaved] = useState(false);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const handleCommit = () => {
+    onSave(draft.trim());
+    setIsEditing(false);
+    setIsJustSaved(true);
+    setTimeout(() => setIsJustSaved(false), 2000);
+  };
+
+  const handleCancel = () => {
+    setDraft(value);
+    setIsEditing(false);
+  };
+
+  const tags = draft.split(',').map(k => k.trim()).filter(Boolean);
+
+  return (
+    <div className="space-y-1">
+      <div className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-widest flex justify-between items-center">
+        <span className="flex items-center gap-1.5">
+          Keywords ({tags.length} Tags)
+          {isJustSaved && (
+            <span className="text-[9px] font-sans font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
+              <Check size={10} strokeWidth={3} /> Saved
+            </span>
+          )}
+        </span>
+        <div className="flex items-center gap-1.5">
+          {!isEditing ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsEditing(true)}
+                className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider text-zinc-500 hover:text-zinc-900 dark:hover:text-white bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                title="Edit keywords"
+              >
+                <Pencil size={10} />
+                <span>Edit</span>
+              </button>
+              <CopyButton text={value} />
+            </>
+          ) : (
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleCancel}
+                className="px-2 py-0.5 rounded text-[10px] font-bold text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleCommit}
+                className="px-2.5 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold flex items-center gap-1 cursor-pointer shadow-2xs"
+              >
+                <Check size={11} strokeWidth={3} />
+                <span>Save</span>
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="bg-[#ECEEF4] dark:bg-[#1A202F] p-3 rounded-lg border border-zinc-300/60 dark:border-white/10">
+        {isEditing ? (
+          <div className="space-y-2">
+            <textarea
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              rows={3}
+              placeholder="Enter comma-separated keywords: vector, modern, isolated..."
+              className="w-full bg-white dark:bg-black/30 border border-emerald-500/50 rounded-md p-2 text-xs text-zinc-900 dark:text-white focus:outline-hidden font-normal leading-relaxed resize-y"
+            />
+            <p className="text-[10px] text-zinc-400">Separate tags with commas. Press Save to confirm.</p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
+            {value.split(',').map((kw, idx) => (
+              <span
+                key={idx}
+                className="px-2 py-0.5 text-[11px] rounded border transition-colors bg-[#D5D9E2] dark:bg-[#22293C] text-zinc-700 dark:text-zinc-300 border-zinc-300/50 dark:border-white/5"
+              >
+                {kw.trim()}
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Reusable Editable Prompt
+function EditablePromptCard({
+  value,
+  onSave
+}: {
+  value: string;
+  onSave: (val: string) => void;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const [isJustSaved, setIsJustSaved] = useState(false);
+
+  useEffect(() => {
+    setDraft(value);
+  }, [value]);
+
+  const handleCommit = () => {
+    onSave(draft.trim());
+    setIsEditing(false);
+    setIsJustSaved(true);
+    setTimeout(() => setIsJustSaved(false), 2000);
+  };
+
+  const handleCancel = () => {
+    setDraft(value);
+    setIsEditing(false);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          {isJustSaved && (
+            <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+              <Check size={11} strokeWidth={3} /> 100% Saved
+            </span>
+          )}
+        </div>
+        {!isEditing ? (
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white bg-zinc-200/70 hover:bg-zinc-200 dark:bg-white/10 dark:hover:bg-white/15 transition-all cursor-pointer"
+            title="Edit Prompt Text"
+          >
+            <Pencil size={11} />
+            <span>Edit Prompt</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleCancel}
+              className="px-2.5 py-1 rounded-lg text-xs font-semibold text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-200 cursor-pointer"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleCommit}
+              className="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1 cursor-pointer shadow-xs"
+            >
+              <Check size={12} strokeWidth={3} />
+              <span>Save Prompt</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isEditing ? (
+        <textarea
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          rows={5}
+          className="w-full bg-white dark:bg-black/40 border border-emerald-500/60 rounded-xl p-3 text-sm md:text-[15px] text-zinc-900 dark:text-white focus:outline-hidden font-normal leading-relaxed resize-y shadow-xs"
+        />
+      ) : (
+        <p className="text-zinc-800 dark:text-zinc-200 text-sm md:text-[15px] font-normal leading-relaxed tracking-normal select-text">
+          {value}
+        </p>
+      )}
+    </div>
   );
 }
 
