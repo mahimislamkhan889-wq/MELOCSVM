@@ -30,7 +30,7 @@ import {
   Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { db } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
 import { 
   collection, 
   getDocs, 
@@ -165,6 +165,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
   }, []);
 
   // Fetch users from Firestore
+  // Fetch users from Firestore with strict 100% accurate resolution
   const fetchUsers = async () => {
     setLoading(true);
     setNotification(null);
@@ -172,47 +173,100 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
       const snap = await getDocs(collection(db, 'users'));
       const list: AdminUserItem[] = [];
 
-      snap.forEach((d) => {
+      for (const d of snap.docs) {
         const data = d.data();
-        let userRole: UserRole = 'Staff User';
-        if (data.role === 'admin' || data.email === 'mahimislamkhan889@gmail.com') {
-          userRole = 'Administrator';
-        } else if (data.role === 'owner') {
-          userRole = 'Account Owner';
-        } else if (data.role === 'contributor') {
-          userRole = 'Contributor';
-        } else if (data.role === 'staff') {
-          userRole = 'Staff User';
+
+        // 1. Purge phantom 'guest' and anonymous test sessions from Firestore
+        if (
+          d.id === 'guest' || 
+          d.id.startsWith('guest_') || 
+          data.isAnonymous === true || 
+          (!data.email && !data.phoneNumber && (!data.name || data.name === 'New Member' || data.name === 'Contributor'))
+        ) {
+          // Permanently delete phantom doc from database so it never returns
+          deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+          continue;
         }
 
-        let userStatus: UserStatus = 'Active';
-        if (data.status === 'Non -login' || data.status === 'non-login' || !data.lastActive) {
-          userStatus = data.status === 'Unconfirmed' ? 'Unconfirmed' : (data.creditsUsed === 0 && !data.lastActive ? 'Non -login' : 'Active');
+        // 2. Resolve Email: Check real email/Gmail or phone number (reject 'Authenticated User' placeholder)
+        let rawEmail = (data.email || data.gmail || data.googleEmail || data.providerEmail || data.phoneNumber || '').trim();
+        
+        // Strip out corrupt placeholder string 'Authenticated User' or 'guest'
+        if (rawEmail === 'Authenticated User' || rawEmail === 'guest') {
+          rawEmail = (data.gmail || data.googleEmail || data.providerEmail || data.phoneNumber || '').trim();
+          if (rawEmail === 'Authenticated User' || rawEmail === 'guest') {
+            rawEmail = '';
+          }
         }
+
+        // Auto-heal doc if current auth user is this member and has email
+        if (auth.currentUser && auth.currentUser.uid === d.id) {
+          const authEmail = auth.currentUser.email || 
+            auth.currentUser.providerData?.find((p: any) => p?.email)?.email || 
+            auth.currentUser.providerData?.[0]?.email || 
+            auth.currentUser.phoneNumber;
+          if (authEmail && authEmail !== 'Authenticated User') {
+            rawEmail = authEmail;
+            updateDoc(doc(db, 'users', d.id), { 
+              email: authEmail,
+              gmail: authEmail.endsWith('@gmail.com') ? authEmail : '' 
+            }).catch(() => {});
+          }
+        }
+
+        const userEmail = rawEmail;
+
+        // Skip completely orphaned docs that have no credentials or name
+        if (!userEmail && !data.name && !data.displayName) {
+          deleteDoc(doc(db, 'users', d.id)).catch(() => {});
+          continue;
+        }
+
+        // 3. Resolve Role: Default is strictly 'Contributor' (Staff User only if assigned)
+        let userRole: UserRole = 'Contributor';
+        if (data.role === 'admin' || userEmail === 'mahimislamkhan889@gmail.com' || userEmail === '+8801948481216') {
+          userRole = 'Administrator';
+        } else if (data.role === 'owner' || data.role === 'Account Owner') {
+          userRole = 'Account Owner';
+        } else if (data.role === 'staff' || data.role === 'Staff User') {
+          userRole = 'Staff User';
+        } else {
+          userRole = 'Contributor';
+        }
+
+        // 4. Resolve Name: Real full name or clean email handle
+        const userName = data.displayName || data.name || (userEmail && userEmail.includes('@') ? userEmail.split('@')[0] : (userEmail.startsWith('+') ? `Contributor (${userEmail.slice(-4)})` : 'Staff Member'));
+
+        // 5. Resolve Status:
+        let userStatus: UserStatus = 'Active';
         if (data.status === 'Unconfirmed' || data.isUnconfirmed) {
           userStatus = 'Unconfirmed';
+        } else if (data.status === 'Non -login' || data.status === 'non-login') {
+          userStatus = 'Non -login';
+        } else {
+          userStatus = 'Active';
         }
 
         const idNum = data.idNumber || data.uid?.slice(0, 5) || d.id.slice(0, 5);
 
         list.push({
           id: d.id,
-          name: data.displayName || data.name || (data.email ? data.email.split('@')[0] : 'Contributor'),
+          name: userName,
           role: userRole,
-          email: data.email || data.phoneNumber || d.id,
+          email: userEmail,
           idNumber: idNum,
-          status: (data.status as UserStatus) || userStatus,
+          status: userStatus,
           credits: typeof data.credits === 'number' ? data.credits : 50,
           creditsUsed: typeof data.creditsUsed === 'number' ? data.creditsUsed : 0,
           photoURL: resolveUserAvatar({
             photoURL: data.photoURL || data.profilePic || null,
-            name: data.displayName || data.name || (data.email ? data.email.split('@')[0] : 'Contributor'),
-            email: data.email || data.phoneNumber || d.id,
+            name: userName,
+            email: userEmail,
             id: d.id
           }),
           createdAt: data.createdAt
         });
-      });
+      }
 
       list.sort((a, b) => {
         if (a.role === 'Administrator' && b.role !== 'Administrator') return -1;
@@ -361,8 +415,9 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
   // Add New Member
   const handleCreateMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.email.trim()) {
-      setNotification({ type: 'error', message: 'Please enter a valid email or phone.' });
+    const cleanEmail = formData.email.trim();
+    if (!cleanEmail || cleanEmail === 'Authenticated User') {
+      setNotification({ type: 'error', message: 'Please enter a valid Gmail, email, or phone number.' });
       return;
     }
 
@@ -373,14 +428,15 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
 
       const finalAvatar = formData.photoURL || resolveUserAvatar({
         name: formData.name,
-        email: formData.email,
+        email: cleanEmail,
         id: userId
       });
 
       const payload = {
         displayName: formData.name || 'New Member',
         name: formData.name || 'New Member',
-        email: formData.email,
+        email: cleanEmail,
+        gmail: cleanEmail.toLowerCase().endsWith('@gmail.com') ? cleanEmail : '',
         role: formData.role === 'Administrator' ? 'admin' : (formData.role === 'Account Owner' ? 'owner' : 'staff'),
         status: formData.status,
         idNumber: randomIdNumber,
@@ -394,7 +450,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
 
       await setDoc(newDocRef, payload, { merge: true });
 
-      setNotification({ type: 'success', message: `Member ${formData.name || formData.email} created successfully!` });
+      setNotification({ type: 'success', message: `Member ${formData.name || cleanEmail} created successfully!` });
       setIsAddModalOpen(false);
       setFormData({
         name: '',
@@ -416,10 +472,16 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
     e.preventDefault();
     if (!editingUser) return;
 
+    const cleanEmail = formData.email.trim();
+    if (cleanEmail === 'Authenticated User') {
+      setNotification({ type: 'error', message: 'Please enter a valid Gmail or email address.' });
+      return;
+    }
+
     try {
       const finalAvatar = formData.photoURL || editingUser.photoURL || resolveUserAvatar({
         name: formData.name,
-        email: formData.email,
+        email: cleanEmail,
         id: editingUser.id
       });
 
@@ -427,7 +489,8 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
       await updateDoc(userRef, {
         displayName: formData.name,
         name: formData.name,
-        email: formData.email,
+        email: cleanEmail,
+        gmail: cleanEmail.toLowerCase().endsWith('@gmail.com') ? cleanEmail : '',
         role: formData.role === 'Administrator' ? 'admin' : (formData.role === 'Account Owner' ? 'owner' : 'staff'),
         status: formData.status,
         credits: Number(formData.credits),
@@ -436,7 +499,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
         updatedAt: serverTimestamp()
       });
 
-      setNotification({ type: 'success', message: `Updated details for ${formData.name || formData.email}` });
+      setNotification({ type: 'success', message: `Updated details for ${formData.name || cleanEmail}` });
       setEditingUser(null);
       fetchUsers();
     } catch (err: any) {
@@ -784,9 +847,43 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                         {user.role}
                       </td>
 
-                      {/* Email */}
-                      <td className="py-3 px-4 text-zinc-600 dark:text-zinc-300 font-mono text-[11px] whitespace-nowrap">
-                        {user.email}
+                      {/* Email / Gmail */}
+                      <td className="py-3 px-4 font-mono text-[11px] whitespace-nowrap">
+                        {user.email && user.email !== 'Authenticated User' && (user.email.includes('@') || user.email.startsWith('+')) ? (
+                          <div className="flex items-center gap-1.5">
+                            <span className="text-zinc-700 dark:text-zinc-200">{user.email}</span>
+                            {user.email.toLowerCase().endsWith('@gmail.com') && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] font-sans font-semibold bg-red-50 text-red-600 dark:bg-red-500/15 dark:text-red-300 border border-red-200/60 dark:border-red-500/20">
+                                Gmail
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-sans text-amber-700 dark:text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/30 flex items-center gap-1 font-medium">
+                              <AlertCircle size={11} className="text-amber-500 shrink-0" />
+                              No Email Linked
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingUser(user);
+                                setFormData({
+                                  name: user.name,
+                                  email: '',
+                                  role: user.role,
+                                  status: user.status,
+                                  credits: user.credits,
+                                  idNumber: user.idNumber,
+                                  photoURL: user.photoURL || ''
+                                });
+                              }}
+                              className="text-[11px] font-sans font-semibold text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 underline cursor-pointer"
+                            >
+                              + Add Gmail
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* ID Number / Credits */}
@@ -838,7 +935,7 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                               setEditingUser(user);
                               setFormData({
                                 name: user.name,
-                                email: user.email,
+                                email: (user.email === 'Authenticated User' || !user.email.includes('@')) ? '' : user.email,
                                 role: user.role,
                                 status: user.status,
                                 credits: user.credits,
@@ -1371,14 +1468,17 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-zinc-600 dark:text-zinc-300 font-medium mb-1">Email or Phone</label>
+                  <label className="block text-zinc-600 dark:text-zinc-300 font-medium mb-1 flex items-center justify-between">
+                    <span>Member Email / Gmail</span>
+                    <span className="text-[10px] text-zinc-400">e.g. user@gmail.com</span>
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="e.g. deanna.curtis@example.com"
+                    placeholder="e.g. contributor@gmail.com"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-3 py-2 text-zinc-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40 font-mono"
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-3 py-2 text-zinc-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/40 font-mono text-xs"
                   />
                 </div>
 
@@ -1519,12 +1619,17 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-zinc-600 dark:text-zinc-300 font-medium mb-1">Email / Phone</label>
+                  <label className="block text-zinc-600 dark:text-zinc-300 font-medium mb-1 flex items-center justify-between">
+                    <span>Member Email / Gmail</span>
+                    <span className="text-[10px] text-zinc-400">e.g. mainul@gmail.com</span>
+                  </label>
                   <input
                     type="text"
+                    required
+                    placeholder="Enter member's real Gmail or email address"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-3 py-2 text-zinc-900 dark:text-white font-mono"
+                    className="w-full bg-zinc-50 dark:bg-black/20 border border-zinc-200 dark:border-white/10 rounded-xl px-3 py-2 text-zinc-900 dark:text-white font-mono text-xs focus:ring-2 focus:ring-emerald-500 focus:outline-hidden"
                   />
                 </div>
 

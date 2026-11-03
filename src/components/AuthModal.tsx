@@ -29,7 +29,9 @@ import {
   ConfirmationResult, 
   User as FirebaseUser
 } from 'firebase/auth';
-import { auth } from '../lib/firebase';
+import { auth, db } from '../lib/firebase';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { syncUserOnLogin } from '../services/userSyncService';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -150,7 +152,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
-      handleAuthSuccess(result.user, result.user.displayName || result.user.email || 'Creator');
+      const googleUser = result.user;
+      
+      // Instantly collect all user details (Gmail, name, photo, role) into Firestore on login
+      const syncedUser = await syncUserOnLogin(googleUser);
+      const cleanName = syncedUser?.displayName || googleUser.displayName || 'Contributor';
+      
+      handleAuthSuccess(syncedUser || googleUser, cleanName);
     } catch (err: any) {
       console.error('Google Sign-In Error:', err);
       if (err.code === 'auth/popup-closed-by-user') {
@@ -205,16 +213,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       if (isRegistering) {
         // Register new contributor
         const cred = await createUserWithEmailAndPassword(auth, cleanEmail, password);
+        const cleanName = displayName.trim() || cleanEmail.split('@')[0];
         if (displayName.trim()) {
           try {
             await updateProfile(cred.user, { displayName: displayName.trim() });
           } catch {}
         }
-        handleAuthSuccess(cred.user, displayName.trim() || cleanEmail.split('@')[0]);
+        const syncedUser = await syncUserOnLogin(cred.user);
+        handleAuthSuccess(syncedUser || cred.user, cleanName);
       } else {
         // Sign in existing contributor
         const cred = await signInWithEmailAndPassword(auth, cleanEmail, password);
-        handleAuthSuccess(cred.user, cred.user.displayName || cleanEmail.split('@')[0]);
+        const syncedUser = await syncUserOnLogin(cred.user);
+        const cleanName = syncedUser?.displayName || cred.user.displayName || cleanEmail.split('@')[0];
+        handleAuthSuccess(syncedUser || cred.user, cleanName);
       }
     } catch (err: any) {
       console.error('Email Auth Error:', err);
@@ -306,7 +318,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     setIsLoading(true);
     try {
       const result = await confirmationResult.confirm(cleanOtp);
-      handleAuthSuccess(result.user, result.user.phoneNumber || 'Contributor');
+      const phoneUser = result.user;
+      const syncedUser = await syncUserOnLogin(phoneUser);
+      const cleanName = syncedUser?.displayName || `Contributor (${phoneUser.phoneNumber?.slice(-4) || 'Mobile'})`;
+      handleAuthSuccess(syncedUser || phoneUser, cleanName);
     } catch (err: any) {
       console.error('OTP Verification Error:', err);
       if (err.code === 'auth/invalid-verification-code') {
@@ -320,7 +335,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     }
   };
 
-  // 5. Handle Instant Contributor Quick Access
+  // 5. Handle Instant Contributor Quick Access (Guest Session, does not pollute registered members)
   const handleInstantAccess = async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -329,17 +344,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     try {
       // Try official anonymous auth first
       const cred = await signInAnonymously(auth);
-      handleAuthSuccess(cred.user, 'Melo Creator');
+      handleAuthSuccess(cred.user, 'Guest Contributor');
     } catch (err) {
       console.warn('Anonymous auth notice, falling back to local creator session:', err);
-      // Seamless fallback so contributor is NEVER blocked
       const localCreator = {
         uid: 'creator_' + Math.random().toString(36).substring(2, 9),
-        displayName: 'Melo Creator',
-        email: 'creator@melo.workspace',
+        displayName: 'Guest Contributor',
+        email: '',
         isAnonymous: true,
       };
-      handleAuthSuccess(localCreator, 'Melo Creator');
+      handleAuthSuccess(localCreator, 'Guest Contributor');
     }
   };
 

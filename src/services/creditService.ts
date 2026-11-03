@@ -1,4 +1,4 @@
-import { db } from '../lib/firebase';
+import { db, auth } from '../lib/firebase';
 import { doc, getDoc, setDoc, updateDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
 
 export interface CreditTransaction {
@@ -85,7 +85,7 @@ export function subscribeUserCredits(
   uid: string,
   onUpdate: (data: UserCreditData) => void
 ): () => void {
-  if (!uid) {
+  if (!uid || uid === 'guest' || uid.startsWith('guest_') || uid.startsWith('creator_')) {
     const fallback = getLocalUserCredits('guest');
     onUpdate(fallback);
     return () => {};
@@ -150,9 +150,21 @@ export function subscribeUserCredits(
           saveLocalUserCredits(uid, initialData);
           onUpdate(initialData);
 
+          const authUser = auth.currentUser;
+          const isAnon = authUser?.isAnonymous || false;
+          const docEmail = authUser?.email || authUser?.providerData?.find((p: any) => p?.email)?.email || authUser?.providerData?.[0]?.email || authUser?.phoneNumber || '';
+          const docName = authUser?.displayName || (docEmail && docEmail.includes('@') ? docEmail.split('@')[0] : (isAnon ? 'Guest Contributor' : 'Contributor'));
+
           setDoc(
             userDocRef,
             {
+              uid,
+              name: docName,
+              displayName: docName,
+              email: docEmail,
+              role: docEmail === 'mahimislamkhan889@gmail.com' ? 'admin' : 'contributor',
+              status: 'Active',
+              isAnonymous: isAnon,
               credits: DEFAULT_INITIAL_CREDITS,
               creditsUsed: 0,
               claimedPromoCodes: [],
@@ -219,6 +231,13 @@ export async function deductCredits(
 
   saveLocalUserCredits(uid, updated);
 
+  if (!uid || uid === 'guest' || uid.startsWith('guest_') || uid.startsWith('creator_')) {
+    return {
+      success: true,
+      remainingCredits: newCredits
+    };
+  }
+
   try {
     const userDocRef = doc(db, 'users', uid);
     await updateDoc(userDocRef, {
@@ -268,6 +287,10 @@ export async function addCredits(
   };
 
   saveLocalUserCredits(uid, updated);
+
+  if (!uid || uid === 'guest' || uid.startsWith('guest_') || uid.startsWith('creator_')) {
+    return { success: true, newBalance: newCredits };
+  }
 
   try {
     const userDocRef = doc(db, 'users', uid);

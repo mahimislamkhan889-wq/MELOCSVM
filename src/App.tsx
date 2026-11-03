@@ -20,6 +20,7 @@ import { AdminUsersModal } from './components/AdminUsersModal';
 import { ProfileAvatarModal } from './components/ProfileAvatarModal';
 import { TrackerSection } from './components/TrackerSection';
 import { resolveUserAvatar, getFallbackAvatarUrl } from './lib/avatarHelper';
+import { syncUserOnLogin } from './services/userSyncService';
 import { 
   UserCreditData, 
   getLocalUserCredits, 
@@ -136,10 +137,22 @@ export default function App() {
 
   useEffect(() => {
     // Check if user is returning from a Google redirect sign-in
-    getRedirectResult(auth).then((result) => {
+    getRedirectResult(auth).then(async (result) => {
       if (result && result.user) {
-        const resolvedPhoto = resolveUserAvatar(result.user);
-        setCurrentUser({ ...result.user, photoURL: resolvedPhoto });
+        // Collect full user credentials immediately upon return from redirect
+        const synced = await syncUserOnLogin(result.user);
+        if (synced) {
+          setCurrentUser(synced);
+          try {
+            localStorage.setItem('melo_creator_auth', JSON.stringify({
+              uid: synced.uid,
+              displayName: synced.displayName,
+              email: synced.email,
+              photoURL: synced.photoURL,
+              role: synced.role
+            }));
+          } catch {}
+        }
       }
     }).catch((err) => {
       console.warn("Redirect auth info:", err);
@@ -147,63 +160,36 @@ export default function App() {
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        let finalPhotoURL = user.photoURL || null;
-        let firestoreUserDoc: any = null;
-
-        try {
-          const userDocRef = doc(db, 'users', user.uid);
-          const snap = await getDoc(userDocRef);
-          if (snap.exists()) {
-            firestoreUserDoc = snap.data();
-            if (!finalPhotoURL && (firestoreUserDoc.photoURL || firestoreUserDoc.profilePic)) {
-              finalPhotoURL = firestoreUserDoc.photoURL || firestoreUserDoc.profilePic;
-            }
-          }
-        } catch (e) {
-          console.warn("Could not read user profile from firestore:", e);
-        }
-
-        if (!finalPhotoURL) {
-          finalPhotoURL = resolveUserAvatar({
-            displayName: user.displayName || '',
-            email: user.email || '',
-            id: user.uid
-          });
-        }
-
-        const mergedUser = {
-          ...user,
-          uid: user.uid,
-          displayName: user.displayName || firestoreUserDoc?.displayName || firestoreUserDoc?.name || 'Melo Creator',
-          email: user.email || user.phoneNumber || firestoreUserDoc?.email || 'Authenticated User',
-          photoURL: finalPhotoURL,
-          role: firestoreUserDoc?.role || (user.email === 'mahimislamkhan889@gmail.com' ? 'admin' : 'staff')
-        };
-
-        setCurrentUser(mergedUser);
-
-        try {
-          localStorage.setItem('melo_creator_auth', JSON.stringify({
-            uid: mergedUser.uid,
-            displayName: mergedUser.displayName,
-            email: mergedUser.email,
-            photoURL: finalPhotoURL,
-            role: mergedUser.role
-          }));
-        } catch {}
-
-        // Persist photoURL and profile in Firestore so it's always accessible to Admin Control Center
-        try {
-          const userDocRef = doc(db, 'users', user.uid);
-          setDoc(userDocRef, {
+        const isAnon = user.isAnonymous || false;
+        
+        // If anonymous, don't create or pollute registered member record in Firestore
+        if (isAnon) {
+          setCurrentUser({
+            ...user,
             uid: user.uid,
-            displayName: mergedUser.displayName,
-            name: mergedUser.displayName,
-            email: mergedUser.email,
-            photoURL: finalPhotoURL,
-            lastActive: serverTimestamp()
-          }, { merge: true }).catch(() => {});
-        } catch {}
+            displayName: 'Guest Contributor',
+            email: '',
+            role: 'contributor',
+            photoURL: resolveUserAvatar({ displayName: 'Guest', id: user.uid }),
+            isAnonymous: true
+          });
+          return;
+        }
+
+        // Instantly collect and synchronize full authentic user profile (Gmail, name, photo, phone, role) on login
+        const synced = await syncUserOnLogin(user);
+        if (synced) {
+          setCurrentUser(synced);
+          try {
+            localStorage.setItem('melo_creator_auth', JSON.stringify({
+              uid: synced.uid,
+              displayName: synced.displayName,
+              email: synced.email,
+              photoURL: synced.photoURL,
+              role: synced.role
+            }));
+          } catch {}
+        }
       }
     });
     return () => unsubscribe();
@@ -1007,7 +993,7 @@ export default function App() {
                         </button>
                       </div>
                       <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
-                        {currentUser.email || currentUser.phoneNumber || 'Authenticated User'}
+                        {currentUser.email || currentUser.phoneNumber || 'Contributor'}
                       </p>
                     </div>
                   </div>
@@ -2194,15 +2180,24 @@ export default function App() {
           onClose={() => setIsAuthModalOpen(false)} 
           onSuccess={(user) => {
             if (user) {
-              const resolvedPhoto = resolveUserAvatar(user);
-              const userWithPhoto = { ...user, photoURL: resolvedPhoto };
-              setCurrentUser(userWithPhoto);
+              const finalPhoto = user.photoURL || resolveUserAvatar(user);
+              const cleanEmail = user.email || '';
+              const cleanName = user.displayName || user.name || (cleanEmail && cleanEmail.includes('@') ? cleanEmail.split('@')[0] : 'Contributor');
+              const finalUser = {
+                ...user,
+                displayName: cleanName,
+                name: cleanName,
+                email: cleanEmail,
+                photoURL: finalPhoto
+              };
+              setCurrentUser(finalUser);
               try {
                 localStorage.setItem('melo_creator_auth', JSON.stringify({
                   uid: user.uid,
-                  displayName: user.displayName || 'Melo Creator',
-                  email: user.email || user.phoneNumber || 'Authenticated User',
-                  photoURL: resolvedPhoto
+                  displayName: cleanName,
+                  email: cleanEmail,
+                  photoURL: finalPhoto,
+                  role: user.role || 'contributor'
                 }));
               } catch {}
             }
