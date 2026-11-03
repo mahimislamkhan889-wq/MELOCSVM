@@ -497,7 +497,7 @@ export const TrackerSection: React.FC<TrackerSectionProps> = ({
       if (res && res.items && res.items.length > 0) {
         const mapped: TrackedAsset[] = res.items.map((item, idx) => ({
           id: item.assetId || String(210000000 + idx),
-          title: item.assetTitle || `Commercial Asset #${item.assetId}`,
+          title: item.assetTitle || `Stock Asset #${item.assetId}`,
           thumb: item.thumbnailUrl || 'https://images.unsplash.com/photo-1543258103-a62bdc069871?w=600&auto=format&fit=crop&q=80',
           downloads: item.downloadCount || 1842,
           views: item.viewCount || 25670,
@@ -510,7 +510,7 @@ export const TrackerSection: React.FC<TrackerSectionProps> = ({
           category: item.categoryName || 'Business',
           width: item.width || 6000,
           height: item.height || 4000,
-          keywords: item.keywords && item.keywords.length > 0 ? item.keywords : ['stock', 'commercial'],
+          keywords: item.keywords && item.keywords.length > 0 ? item.keywords.filter(k => !/commercial/i.test(k)) : ['stock', 'photography'],
           assetUrl: item.assetUrl || `https://stock.adobe.com/${item.assetId}`,
           rawItem: item
         }));

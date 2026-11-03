@@ -7,10 +7,9 @@ import { Phone, ArrowRight, X, Moon, Sun, Camera, Lock } from 'lucide-react';
 
 
 import { db, auth } from './lib/firebase';
-import { onAuthStateChanged, signOut, User as FirebaseUser } from 'firebase/auth';
+import { onAuthStateChanged, signOut, getRedirectResult, updateProfile, User as FirebaseUser } from 'firebase/auth';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { doc, getDoc, setDoc, onSnapshot, serverTimestamp } from 'firebase/firestore';
-
 
 import { EventCalendar } from './components/EventCalendar';
 import { LandingPage } from './components/LandingPage';
@@ -18,7 +17,9 @@ import { AllReviewsPage } from './components/AllReviewsPage';
 import { AuthModal } from './components/AuthModal';
 import { CreditModal } from './components/CreditModal';
 import { AdminUsersModal } from './components/AdminUsersModal';
+import { ProfileAvatarModal } from './components/ProfileAvatarModal';
 import { TrackerSection } from './components/TrackerSection';
+import { resolveUserAvatar, getFallbackAvatarUrl } from './lib/avatarHelper';
 import { 
   UserCreditData, 
   getLocalUserCredits, 
@@ -75,12 +76,19 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<any>(() => {
     try {
       const saved = localStorage.getItem('melo_creator_auth');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed) {
+          parsed.photoURL = resolveUserAvatar(parsed);
+          return parsed;
+        }
+      }
     } catch {}
     return null;
   });
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isAvatarModalOpen, setIsAvatarModalOpen] = useState(false);
 
   // User Credits State (Real-time Firestore + Local Cache Sync)
   const [userCredits, setUserCredits] = useState<UserCreditData>(() => 
@@ -92,6 +100,32 @@ export default function App() {
 
   const isAdmin = currentUser?.email === 'mahimislamkhan889@gmail.com' || currentUser?.role === 'admin' || currentUser?.phoneNumber === '+8801948481216';
 
+  const handleUpdateAvatar = async (newPhotoURL: string) => {
+    if (auth.currentUser) {
+      try {
+        await updateProfile(auth.currentUser, { photoURL: newPhotoURL });
+      } catch (err) {
+        console.warn('Firebase auth updateProfile notice:', err);
+      }
+    }
+    const uid = currentUser?.uid || auth.currentUser?.uid;
+    if (uid) {
+      try {
+        const userDocRef = doc(db, 'users', uid);
+        await setDoc(userDocRef, { photoURL: newPhotoURL, updatedAt: serverTimestamp() }, { merge: true });
+      } catch (err) {
+        console.warn('Firestore avatar update notice:', err);
+      }
+    }
+    setCurrentUser((prev: any) => {
+      const updated = { ...(prev || {}), photoURL: newPhotoURL };
+      try {
+        localStorage.setItem('melo_creator_auth', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
+
   useEffect(() => {
     const uid = currentUser?.uid || 'guest';
     const unsubscribe = subscribeUserCredits(uid, (data) => {
@@ -101,16 +135,74 @@ export default function App() {
   }, [currentUser?.uid]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
+    // Check if user is returning from a Google redirect sign-in
+    getRedirectResult(auth).then((result) => {
+      if (result && result.user) {
+        const resolvedPhoto = resolveUserAvatar(result.user);
+        setCurrentUser({ ...result.user, photoURL: resolvedPhoto });
+      }
+    }).catch((err) => {
+      console.warn("Redirect auth info:", err);
+    });
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        setCurrentUser(user);
+        let finalPhotoURL = user.photoURL || null;
+        let firestoreUserDoc: any = null;
+
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          const snap = await getDoc(userDocRef);
+          if (snap.exists()) {
+            firestoreUserDoc = snap.data();
+            if (!finalPhotoURL && (firestoreUserDoc.photoURL || firestoreUserDoc.profilePic)) {
+              finalPhotoURL = firestoreUserDoc.photoURL || firestoreUserDoc.profilePic;
+            }
+          }
+        } catch (e) {
+          console.warn("Could not read user profile from firestore:", e);
+        }
+
+        if (!finalPhotoURL) {
+          finalPhotoURL = resolveUserAvatar({
+            displayName: user.displayName || '',
+            email: user.email || '',
+            id: user.uid
+          });
+        }
+
+        const mergedUser = {
+          ...user,
+          uid: user.uid,
+          displayName: user.displayName || firestoreUserDoc?.displayName || firestoreUserDoc?.name || 'Melo Creator',
+          email: user.email || user.phoneNumber || firestoreUserDoc?.email || 'Authenticated User',
+          photoURL: finalPhotoURL,
+          role: firestoreUserDoc?.role || (user.email === 'mahimislamkhan889@gmail.com' ? 'admin' : 'staff')
+        };
+
+        setCurrentUser(mergedUser);
+
         try {
           localStorage.setItem('melo_creator_auth', JSON.stringify({
-            uid: user.uid,
-            displayName: user.displayName || 'Melo Creator',
-            email: user.email || user.phoneNumber || 'Authenticated User',
-            photoURL: user.photoURL || null
+            uid: mergedUser.uid,
+            displayName: mergedUser.displayName,
+            email: mergedUser.email,
+            photoURL: finalPhotoURL,
+            role: mergedUser.role
           }));
+        } catch {}
+
+        // Persist photoURL and profile in Firestore so it's always accessible to Admin Control Center
+        try {
+          const userDocRef = doc(db, 'users', user.uid);
+          setDoc(userDocRef, {
+            uid: user.uid,
+            displayName: mergedUser.displayName,
+            name: mergedUser.displayName,
+            email: mergedUser.email,
+            photoURL: finalPhotoURL,
+            lastActive: serverTimestamp()
+          }, { merge: true }).catch(() => {});
         } catch {}
       }
     });
@@ -352,16 +444,16 @@ export default function App() {
 
     const activeMode = (tab === 'admin' || tab === 'builder') ? 'metadata' : tab as AppMode;
     const currentSettings = useSettings || settingsRef.current;
-    const BATCH_SIZE = 5;
+    const BATCH_SIZE = 2;
 
-    // Split eligible items into strict batches of 5 files
+    // Split eligible items into batches of 2 files to keep concurrent API calls under quota limits
     const chunks: MediaFile[][] = [];
     for (let i = 0; i < eligibleItems.length; i += BATCH_SIZE) {
       chunks.push(eligibleItems.slice(i, i + BATCH_SIZE));
     }
 
     try {
-      // Process batch by batch: wait for all 5 files in current batch to finish and transition to SUCCESS together at once
+      // Process batch by batch with steady pacing to guarantee 100% visual analysis reliability
       for (const chunk of chunks) {
         // Mark current batch items as processing
         setProcessingFiles(prev => {
@@ -374,14 +466,14 @@ export default function App() {
           chunk.some(p => p.id === f.id) ? { ...f, status: 'processing', error: undefined } : f
         ));
 
-        // Process files in the current 5-item batch with a slight 200ms stagger to prevent 429 burst rate limits
+        // Process files in the current batch with a 600ms stagger
         const batchPromises = chunk.map(async (item, itemIdx) => {
           if (!filesRef.current.some(f => f.id === item.id)) {
             return { id: item.id, status: 'cancelled' as const };
           }
 
           if (itemIdx > 0) {
-            await new Promise(r => setTimeout(r, itemIdx * 200));
+            await new Promise(r => setTimeout(r, itemIdx * 600));
           }
 
           const abortController = new AbortController();
@@ -858,22 +950,15 @@ export default function App() {
                 className="w-9 h-9 sm:w-10 sm:h-10 rounded-full border border-zinc-300/80 dark:border-white/20 hover:border-zinc-500 dark:hover:border-white/50 overflow-hidden flex items-center justify-center transition-all cursor-pointer shadow-xs active:scale-95 group relative bg-[#DFE3EA] dark:bg-[#1E2536]"
                 title={currentUser ? (currentUser.displayName || currentUser.email || currentUser.phoneNumber || 'User Profile & Credits') : 'Sign In / Register with Gmail or Mobile'}
               >
-                {currentUser?.photoURL ? (
-                  <img 
-                    src={currentUser.photoURL} 
-                    alt={currentUser.displayName || 'Avatar'} 
-                    className="w-full h-full object-cover" 
-                  />
-                ) : currentUser ? (
-                  <div className="w-full h-full flex items-center justify-center bg-indigo-600 text-white font-bold text-xs uppercase">
-                    {(currentUser.displayName || currentUser.email || currentUser.phoneNumber || 'U').slice(0, 2).toUpperCase()}
-                  </div>
-                ) : (
-                  /* Styled avatar matching sneaker / creative creator avatar */
-                  <div className="w-full h-full flex items-center justify-center bg-[#8EA838] dark:bg-[#688220] text-white">
-                    <span className="text-sm select-none" role="img" aria-label="Sneaker Avatar">👟</span>
-                  </div>
-                )}
+                <img 
+                  src={resolveUserAvatar(currentUser)} 
+                  alt={currentUser?.displayName || 'Avatar'} 
+                  referrerPolicy="no-referrer"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = getFallbackAvatarUrl(currentUser?.email || 'melo_creator');
+                  }}
+                  className="w-full h-full object-cover" 
+                />
               </button>
 
               {/* User Account & Credits Dropdown Menu */}
@@ -884,17 +969,43 @@ export default function App() {
                 >
                   {/* Account Header */}
                   <div className="flex items-center gap-3 pb-3 mb-3 border-b border-zinc-300/60 dark:border-white/10">
-                    <div className="w-10 h-10 rounded-full overflow-hidden bg-indigo-600 text-white font-bold flex items-center justify-center shrink-0 shadow-xs">
-                      {currentUser.photoURL ? (
-                        <img src={currentUser.photoURL} alt="Avatar" className="w-full h-full object-cover" />
-                      ) : (
-                        (currentUser.displayName || currentUser.email || currentUser.phoneNumber || 'U').slice(0, 2).toUpperCase()
-                      )}
+                    <div 
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        setIsAvatarModalOpen(true);
+                      }}
+                      className="relative w-11 h-11 rounded-full overflow-hidden border border-zinc-300/80 dark:border-white/20 shadow-xs bg-zinc-200 dark:bg-zinc-700 shrink-0 cursor-pointer group/avatar"
+                      title="Click to customize profile picture"
+                    >
+                      <img 
+                        src={resolveUserAvatar(currentUser)} 
+                        alt="Avatar" 
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = getFallbackAvatarUrl(currentUser?.email || 'melo');
+                        }}
+                        className="w-full h-full object-cover" 
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/avatar:opacity-100 transition-opacity flex items-center justify-center text-white">
+                        <Camera size={13} />
+                      </div>
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50 truncate">
-                        {currentUser.displayName || 'Melo Creator'}
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-bold text-zinc-900 dark:text-zinc-50 truncate">
+                          {currentUser.displayName || 'Melo Creator'}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsUserMenuOpen(false);
+                            setIsAvatarModalOpen(true);
+                          }}
+                          className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                        >
+                          Change Pic
+                        </button>
+                      </div>
                       <p className="text-[11px] text-zinc-500 dark:text-zinc-400 truncate">
                         {currentUser.email || currentUser.phoneNumber || 'Authenticated User'}
                       </p>
@@ -942,6 +1053,20 @@ export default function App() {
                   </div>
 
                   <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsUserMenuOpen(false);
+                        setIsAvatarModalOpen(true);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/5 rounded-xl transition-colors cursor-pointer text-left"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Camera size={14} className="text-emerald-500" />
+                        <span>Customize Profile Picture</span>
+                      </div>
+                      <span className="text-[10px] text-zinc-400 font-mono">Custom</span>
+                    </button>
                     {isAdmin && (
                       <button
                         type="button"
@@ -1501,17 +1626,14 @@ export default function App() {
                           handleProcess();
                         }}
                         disabled={files.length === 0 || pendingCount === 0}
-                        className="px-4 py-1.5 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 rounded-xl font-bold text-xs uppercase tracking-widest flex items-center gap-2 transition-all shadow-md disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed active:scale-95 cursor-pointer shrink-0"
+                        style={{ color: '#ffffff' }}
+                        className="px-4 py-1.5 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white rounded-xl font-bold text-xs uppercase tracking-widest flex items-center gap-2 transition-all shadow-md disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed active:scale-95 cursor-pointer shrink-0"
                         title={!currentUser ? "Login required to process files" : !hasEnoughCredits ? "Insufficient credits - Click to recharge" : "Process eligible files"}
                       >
                         {isProcessing ? (
-                          <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white dark:border-zinc-900/30 dark:border-t-zinc-900 rounded-full animate-spin"/> Processing...</>
-                        ) : !currentUser ? (
-                          <><Lock size={13} /> Process All (Login Required)</>
-                        ) : !hasEnoughCredits ? (
-                          <><Zap size={13} className="text-amber-400 fill-amber-400" /> Need {pendingCount} Credits (Recharge)</>
+                          <><div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin"/> Processing...</>
                         ) : (
-                          <><Zap size={14} className="fill-white dark:fill-zinc-900" /> Process All ({pendingCount} {pendingCount === 1 ? 'Credit' : 'Credits'})</>
+                          <><Zap size={14} className="fill-white text-white" /> Process All</>
                         )}
                       </button>
                     );
@@ -1746,24 +1868,6 @@ export default function App() {
                                         /* Metadata Mode in the same 2-column layout */
                                         <>
                                           <div className="space-y-3.5">
-                                            {/* Stock Friendly Policy Compliance Badge */}
-                                            <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-700 dark:text-emerald-400">
-                                              <div className="flex items-center gap-1.5 font-bold text-xs tracking-tight">
-                                                <ShieldCheck size={14} className="text-emerald-500 shrink-0" />
-                                                <span>Stock-Friendly Verified</span>
-                                              </div>
-                                              <div className="flex items-center gap-1.5 text-[10px] font-semibold opacity-90">
-                                                <span className="hidden sm:inline-flex items-center gap-1 bg-emerald-500/15 px-1.5 py-0.5 rounded text-emerald-800 dark:text-emerald-300">
-                                                  <Check size={10} className="text-emerald-500" /> Zero Trademarks
-                                                </span>
-                                                <span className="inline-flex items-center gap-1 bg-emerald-500/15 px-1.5 py-0.5 rounded text-emerald-800 dark:text-emerald-300">
-                                                  <Check size={10} className="text-emerald-500" /> Adobe Safe
-                                                </span>
-                                                <span className="inline-flex items-center gap-1 bg-emerald-500/15 px-1.5 py-0.5 rounded text-emerald-800 dark:text-emerald-300">
-                                                  <Check size={10} className="text-emerald-500" /> Ranked Tags
-                                                </span>
-                                              </div>
-                                            </div>
 
                                             {/* Title: Shown for Adobe, Freepik, and General */}
                                             {settings.platform !== 'shutterstock' && (file.result.title || file.result.description) && (() => {
@@ -2090,18 +2194,30 @@ export default function App() {
           onClose={() => setIsAuthModalOpen(false)} 
           onSuccess={(user) => {
             if (user) {
-              setCurrentUser(user);
+              const resolvedPhoto = resolveUserAvatar(user);
+              const userWithPhoto = { ...user, photoURL: resolvedPhoto };
+              setCurrentUser(userWithPhoto);
               try {
                 localStorage.setItem('melo_creator_auth', JSON.stringify({
                   uid: user.uid,
                   displayName: user.displayName || 'Melo Creator',
                   email: user.email || user.phoneNumber || 'Authenticated User',
-                  photoURL: user.photoURL || null
+                  photoURL: resolvedPhoto
                 }));
               } catch {}
             }
             setIsAuthModalOpen(false);
           }}
+        />
+      )}
+
+      {/* Profile Avatar Customization Modal */}
+      {isAvatarModalOpen && (
+        <ProfileAvatarModal
+          isOpen={isAvatarModalOpen}
+          onClose={() => setIsAvatarModalOpen(false)}
+          currentUser={currentUser}
+          onUpdateAvatar={handleUpdateAvatar}
         />
       )}
 

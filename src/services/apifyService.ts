@@ -24,10 +24,133 @@ export interface ScrapedStockTagResult {
   source: 'apify' | 'fallback';
 }
 
+import { db } from '../lib/firebase';
+import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+
+export interface ApifyConfigData {
+  token: string;
+  autoScrape: boolean;
+  user: ApifyUser | null;
+  targetPlatforms?: string[];
+  maxKeywords?: number;
+  actorId?: string;
+  updatedAt?: any;
+  updatedBy?: string;
+}
+
 const APIFY_API_BASE = 'https://api.apify.com/v2';
 const TOKEN_STORAGE_KEY = 'melo_apify_token';
 const USER_STORAGE_KEY = 'melo_apify_user';
 const AUTO_SCRAPE_KEY = 'melo_apify_auto_scrape';
+
+export async function fetchApifyConfigFromFirestore(): Promise<ApifyConfigData | null> {
+  try {
+    const configRef = doc(db, 'system_config', 'apify');
+    const snap = await getDoc(configRef);
+    if (snap.exists()) {
+      const data = snap.data() as ApifyConfigData;
+      if (data.token) {
+        saveStoredApifyToken(data.token);
+      }
+      if (data.user) {
+        localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(data.user));
+      }
+      if (typeof data.autoScrape === 'boolean') {
+        setApifyAutoScrapeEnabled(data.autoScrape);
+      }
+      return data;
+    }
+  } catch (err) {
+    console.warn('Failed to load Apify config from Firestore:', err);
+  }
+  return null;
+}
+
+export async function saveApifyConfigToFirestore(config: {
+  token: string;
+  autoScrape: boolean;
+  user?: ApifyUser | null;
+  targetPlatforms?: string[];
+  maxKeywords?: number;
+  actorId?: string;
+  adminEmail?: string;
+}): Promise<boolean> {
+  try {
+    saveStoredApifyToken(config.token);
+    setApifyAutoScrapeEnabled(config.autoScrape);
+    if (config.user) {
+      localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(config.user));
+    } else if (!config.token) {
+      localStorage.removeItem(USER_STORAGE_KEY);
+    }
+
+    const configRef = doc(db, 'system_config', 'apify');
+    await setDoc(configRef, {
+      token: config.token.trim(),
+      autoScrape: config.autoScrape,
+      user: config.user || null,
+      targetPlatforms: config.targetPlatforms || ['adobe', 'shutterstock', 'freepik'],
+      maxKeywords: config.maxKeywords || 50,
+      actorId: config.actorId || 'apify/web-scraper',
+      updatedBy: config.adminEmail || 'admin',
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+    return true;
+  } catch (err) {
+    console.error('Failed to save Apify config to Firestore:', err);
+    return false;
+  }
+}
+
+export async function testApifyScrapeSandbox(seedQuery: string, token?: string, count: number = 50): Promise<{
+  success: boolean;
+  tags: string[];
+  source: string;
+  latencyMs: number;
+  error?: string;
+}> {
+  const startTime = performance.now();
+  const activeToken = (token || getStoredApifyToken() || '').trim();
+  try {
+    const resp = await fetch('/api/apify/scrape', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        token: activeToken,
+        seedTitle: seedQuery,
+        targetCount: count
+      })
+    });
+    const latencyMs = Math.round(performance.now() - startTime);
+    if (resp.ok) {
+      const data = await resp.json();
+      return {
+        success: true,
+        tags: data.tags || [],
+        source: data.source || (activeToken ? 'apify' : 'catalog'),
+        latencyMs
+      };
+    } else {
+      const err = await resp.json().catch(() => ({}));
+      return {
+        success: false,
+        tags: [],
+        source: 'error',
+        latencyMs,
+        error: err.error || `HTTP ${resp.status}`
+      };
+    }
+  } catch (e: any) {
+    const latencyMs = Math.round(performance.now() - startTime);
+    return {
+      success: false,
+      tags: [],
+      source: 'error',
+      latencyMs,
+      error: e?.message || 'Network error'
+    };
+  }
+}
 
 export function getStoredApifyToken(): string {
   if (typeof window === 'undefined') return '';
@@ -219,7 +342,7 @@ const STOCK_KEYWORD_DICTIONARY: Record<string, string[]> = {
     'business', 'office', 'corporate', 'finance', 'work', 'professional', 'concept', 'success', 
     'marketing', 'teamwork', 'strategy', 'management', 'growth', 'company', 'executive', 'career', 
     'workplace', 'meeting', 'entrepreneur', 'leadership', 'analytics', 'investment', 'economy', 
-    'commercial', 'planning', 'job', 'discussion', 'worker', 'collaboration', 'consulting'
+    'planning', 'job', 'discussion', 'worker', 'collaboration', 'consulting'
   ],
   technology: [
     'technology', 'digital', 'tech', 'internet', 'data', 'computer', 'cyber', 'network', 
@@ -282,7 +405,7 @@ const STOCK_KEYWORD_DICTIONARY: Record<string, string[]> = {
     'intelligence', 'exam', 'campus', 'degree', 'training', 'wisdom'
   ],
   shopping: [
-    'shopping', 'retail', 'store', 'sale', 'commercial', 'market', 'consumer', 'discount', 
+    'shopping', 'retail', 'store', 'sale', 'market', 'consumer', 'discount', 
     'purchase', 'commerce', 'ecommerce', 'bag', 'buyer', 'promotion', 'shop', 'customer', 
     'product', 'order', 'deal', 'fashion', 'merchandise'
   ],
@@ -313,12 +436,12 @@ const STOCK_KEYWORD_DICTIONARY: Record<string, string[]> = {
 
 // Universal high-converting stock keyword base for microstock marketplaces
 const HIGH_CONVERTING_STOCK_POOL = [
-  'vector', 'illustration', 'graphic design', 'commercial use', 'isolated', 'artwork',
+  'vector', 'illustration', 'graphic design', 'creative design', 'isolated', 'artwork',
   't-shirt design', 'print ready', 'merchandise', 'sticker', 'scalable', 'digital art',
   'creative asset', 'branding', 'visual element', 'template', 'apparel', 'emblem',
   'badge', 'eps', 'crisp detail', 'screen printing', 'editorial', 'contemporary',
   'decorative', 'detail', 'symbol', 'icon', 'line art', 'sublimation', 'poster',
-  'banner', 'advertising', 'marketing', 'presentation', 'social media', 'creative design',
+  'banner', 'advertising', 'marketing', 'presentation', 'social media', 'creative asset',
   'concept', 'silhouette', 'monochrome', 'clean background', 'print design', 'clip art'
 ];
 
@@ -361,11 +484,11 @@ export async function scrapeMicrostockKeywords(
     STOCK_KEYWORD_DICTIONARY.business.forEach(kw => gatheredTags.add(kw));
   }
 
-  // 3. Platform specific high-value commercial stock tags (Zero brand names - safe for submission)
+  // 3. Platform specific high-value stock tags (Zero brand names - safe for submission)
   if (platform === 'adobe') {
-    ['commercial', 'visual asset', 'stock imagery', 'royalty free', 'editorial quality', 'isolated background', 'copy space'].forEach(t => gatheredTags.add(t));
+    ['visual asset', 'stock imagery', 'royalty free', 'editorial quality', 'isolated background', 'copy space'].forEach(t => gatheredTags.add(t));
   } else if (platform === 'shutterstock') {
-    ['commercial use', 'stock photography', 'creative content', 'high resolution', 'nobody', 'horizontal composition'].forEach(t => gatheredTags.add(t));
+    ['stock photography', 'creative content', 'high resolution', 'nobody', 'horizontal composition'].forEach(t => gatheredTags.add(t));
   } else if (platform === 'freepik') {
     ['graphic resource', 'ready to use', 'premium visual', 'design element', 'flat graphic'].forEach(t => gatheredTags.add(t));
   }
@@ -397,7 +520,7 @@ export async function scrapeMicrostockKeywords(
         clearTimeout(timeoutId);
 
         if (resp.ok) {
-          ['commercial layout', 'design template', 'visual media', 'creative asset', 'digital resource'].forEach(t => gatheredTags.add(t));
+          ['design layout', 'design template', 'visual media', 'creative asset', 'digital resource'].forEach(t => gatheredTags.add(t));
         }
       }
     } catch (e) {
@@ -477,6 +600,25 @@ export async function enrichWithApifyKeywords(
   return Array.from(combined).slice(0, finalTarget).join(', ');
 }
 
+function cleanStockSubjectName(fileName: string, isVector: boolean): string {
+  let clean = fileName.replace(/\.[^/.]+$/, '');
+  clean = clean.replace(/^(360_F|AdobeStock|Depositphotos|Shutterstock|iStock|FT|ID)[-_]?\d+[-_]?/gi, '');
+  clean = clean.replace(/\(\d+\)/g, ' ').replace(/\[\d+\]/g, ' ');
+  const tokens = clean.split(/[-_.\s]+/).filter(Boolean);
+  const validWords = tokens.filter(t => {
+    if (/^\d+$/.test(t)) return false;
+    if (t.length <= 2) return false;
+    if (t.length > 15) return false;
+    if (/[a-zA-Z]/.test(t) && /\d/.test(t) && t.length > 6) return false;
+    if (/^(img|dsc|photo|pic|image|file|asset|stock|vector|thumb|preview|comp)$/i.test(t)) return false;
+    return true;
+  });
+  if (validWords.length === 0) {
+    return isVector ? 'Vector Graphic Design' : 'Creative Studio Artwork';
+  }
+  return validWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+}
+
 /**
  * Fallback metadata generator powered by Apify stock catalog analysis.
  * Generates comprehensive, long commercial titles (20-30 words) and 45-50 keywords.
@@ -488,27 +630,20 @@ export async function generateMetadataFromApify(
   singleWordKeywords: boolean = false
 ) {
   const isVector = file.type.startsWith('image/svg') || file.name.endsWith('.svg') || file.name.endsWith('.eps') || file.name.endsWith('.ai');
-  const cleanName = file.name
-    .replace(/\.[^/.]+$/, '')
-    .replace(/\(\d+\)/g, '')
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b(img|dsc|photo|pic|image|file|\d+)\b/gi, '')
-    .trim();
-  const rawWords = cleanName.split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w));
-  const capitalizedSubject = rawWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || (isVector ? 'Vector Graphic Artwork' : 'Commercial Stock Artwork');
+  const capitalizedSubject = cleanStockSubjectName(file.name, isVector);
 
-  // Generate market-based commercial stock title (strictly 20-30 words, 120-195 characters, NO trailing period)
+  // Generate market-based stock title (strictly 20-30 words, 120-195 characters, NO trailing period)
   let fullTitle = '';
   const cleanSubject = capitalizedSubject.replace(/^Realistic\s+/i, '');
   if (isVector) {
-    fullTitle = `Detailed Vector Graphic Illustration of ${cleanSubject} with Crisp Outlines and Modern Composition for T-Shirt Design, Apparel Print, Sticker, Poster, and Commercial Merchandise`;
+    fullTitle = `Detailed Vector Graphic Illustration of ${cleanSubject} with Crisp Outlines and Balanced Modern Composition for Creative Design, Marketing, and Digital Media Campaigns`;
   } else {
-    fullTitle = `Professional Commercial Photography of ${cleanSubject} with Crisp Visual Composition, Balanced Lighting, and Professional Detail for Advertising, Editorial, and Digital Marketing`;
+    fullTitle = `Professional Photography of ${cleanSubject} with Crisp Visual Composition, Balanced Lighting, and Professional Detail for Advertising, Editorial, and Digital Marketing`;
   }
-  fullTitle = fullTitle.replace(/High\s+Resolution\s+Commercial\s+Stock\s+Photography\s+of\s+Realistic/gi, 'Commercial Photography of');
+  fullTitle = fullTitle.replace(/High\s+Resolution\s+Commercial\s+Stock\s+Photography\s+of\s+Realistic/gi, 'Photography of');
 
   // Generate comprehensive description for Shutterstock and general
-  const description = `Professional commercial visual asset featuring ${capitalizedSubject}. Perfectly composed with balanced studio lighting, crisp textures, and versatile negative copy space. Ideal for corporate branding, website landing pages, creative marketing brochures, and social media campaigns.`;
+  const description = `Professional visual asset featuring ${capitalizedSubject}. Perfectly composed with balanced studio lighting, crisp textures, and versatile negative copy space. Ideal for corporate branding, website landing pages, creative marketing brochures, and social media campaigns.`;
 
   const tagsCount = Math.max(45, Math.min(50, targetKeywords || 50));
   const tags = await scrapeMicrostockKeywords(capitalizedSubject, platform, tagsCount);
@@ -534,7 +669,7 @@ export async function generateMetadataFromApify(
     keywords: finalKeywords.slice(0, tagsCount).join(', '),
     category: isVector ? 'Graphics & Design' : 'Photos',
     contentType: isVector ? 'Vector' : 'Photo',
-    style: 'Commercial Modern',
+    style: 'Modern Stock',
     usedProvider: 'apify',
     usedModel: 'Apify Microstock Engine'
   };
@@ -546,14 +681,7 @@ export async function generateMetadataFromApify(
  */
 export async function generatePromptFromApify(file: File, settings: any) {
   const isVector = file.type.startsWith('image/svg') || file.name.endsWith('.svg') || file.name.endsWith('.eps') || file.name.endsWith('.ai');
-  const cleanName = file.name
-    .replace(/\.[^/.]+$/, '')
-    .replace(/\(\d+\)/g, '')
-    .replace(/[-_]+/g, ' ')
-    .replace(/\b(img|dsc|photo|pic|image|file|\d+)\b/gi, '')
-    .trim();
-  const rawWords = cleanName.split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w));
-  const capitalizedSubject = rawWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || (isVector ? 'Vector Graphic Artwork' : 'Commercial Stock Artwork');
+  const capitalizedSubject = cleanStockSubjectName(file.name, isVector);
 
   let backgroundText = 'isolated on clean studio background with balanced negative space';
   if (settings?.whiteBackground) {
@@ -566,14 +694,14 @@ export async function generatePromptFromApify(file: File, settings: any) {
 
   let prompt = '';
   if (isVector) {
-    prompt = `Professional vector graphic illustration of ${capitalizedSubject}, detailed flat 2D graphic design style, sharp scalable vector lines, vibrant clean color palette, ${backgroundText}, perfect for t-shirt print and commercial merchandise design, high aesthetic quality.`;
+    prompt = `Professional vector graphic illustration of ${capitalizedSubject}, detailed flat 2D graphic design style, sharp scalable vector lines, vibrant clean color palette, ${backgroundText}, perfect for apparel print and merchandise design, high aesthetic quality.`;
   } else {
-    prompt = `Commercial studio photography of ${capitalizedSubject}, close-up framing with shallow depth of field, natural diffused softbox lighting, crisp tactile surface textures, authentic color grading, ${backgroundText}, premium stock photography standard.`;
+    prompt = `Studio photography of ${capitalizedSubject}, close-up framing with shallow depth of field, natural diffused softbox lighting, crisp tactile surface textures, authentic color grading, ${backgroundText}, premium stock photography standard.`;
   }
 
   return {
     detectedSubject: capitalizedSubject,
-    detectedStyle: isVector ? 'Flat Vector Illustration' : 'Commercial Studio Photography',
+    detectedStyle: isVector ? 'Flat Vector Illustration' : 'Studio Photography',
     prompt: prompt.trim(),
     negativePrompt: 'blurry, low quality, distorted, artifacts, watermark, grainy, out of focus',
     usedProvider: 'apify',
@@ -725,7 +853,7 @@ export async function analyzeAdobeStockAssets(
       assetId: numericId,
       assetTitle: index === 0 
         ? "Modern workspace with laptop, coffee, and ambient studio light" 
-        : `Commercial Stock Asset #${numericId} - High Resolution Studio Asset`,
+        : `Stock Asset #${numericId} - High Resolution Studio Asset`,
       assetKind: index % 3 === 0 ? "Vector" : index % 3 === 1 ? "Photo" : "Illustration",
       contentType: "image/jpeg",
       fileFormat: "JPEG",
@@ -752,7 +880,7 @@ export async function analyzeAdobeStockAssets(
       mediaTypeId: 1,
       stockId: numericId,
       compUrl: `https://stock.adobe.com/comp/${numericId}`,
-      keywords: ["workspace", "laptop", "coffee", "desk", "business", "technology", "office", "freelance", "modern", "design", "creative", "commercial", "microstock", "overhead"]
+      keywords: ["workspace", "laptop", "coffee", "desk", "business", "technology", "office", "freelance", "modern", "design", "creative", "microstock", "overhead"]
     };
   });
 

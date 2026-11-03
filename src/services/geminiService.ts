@@ -229,40 +229,20 @@ export async function processMedia(
                          /\.(jpg|jpeg|png|webp|gif|avif|svg|eps|ai|mp4|mov|wmv|avi|mkv)$/i.test(file.name);
   
   let base64Data = '';
+  let mediaMimeType = '';
   if (isImageOrVideo) {
-    if (vecType === 'svg') {
-      try {
-        const pngDataUrl = await rasterizeSvgToPng(file);
-        base64Data = pngDataUrl.split(',')[1] || '';
-      } catch (e) {
-        base64Data = await prepareImageBase64(file);
-      }
-    } else if (vecType === 'eps' || vecType === 'ai') {
-      try {
-        const thumbDataUrl = await extractEmbeddedVectorThumbnail(file);
-        if (thumbDataUrl) {
-          base64Data = thumbDataUrl.split(',')[1] || '';
-        } else {
-          base64Data = await prepareImageBase64(file);
-        }
-      } catch (e) {
-        base64Data = await prepareImageBase64(file);
-      }
-    } else {
-      try {
-        base64Data = await prepareImageBase64(file);
-      } catch (e) {
-        base64Data = '';
-      }
-    }
-
-    // Ensure image base64 is never empty for valid media files
-    if (!base64Data) {
+    try {
+      const prep = await prepareImageBase64AndMime(file);
+      base64Data = prep.base64;
+      mediaMimeType = prep.mimeType;
+    } catch (e) {
+      console.warn('Failed to prepare media, reading raw base64:', e);
       try {
         const raw = await convertFileToBase64(file);
         base64Data = raw.split(',')[1] || '';
-      } catch (e) {
-        console.warn('Direct file base64 read fallback failed:', e);
+        mediaMimeType = file.type || 'image/jpeg';
+      } catch (err) {
+        base64Data = '';
       }
     }
   }
@@ -271,7 +251,7 @@ export async function processMedia(
   const failedKeys: string[] = [];
   const invalidKeys: string[] = [];
 
-  const MAX_RETRIES_PER_KEY = 2;
+  const MAX_RETRIES_PER_KEY = 3;
 
   // 2. Try candidates one by one
   for (let i = 0; i < candidateKeys.length; i++) {
@@ -281,7 +261,7 @@ export async function processMedia(
 
     while (retryCount <= MAX_RETRIES_PER_KEY) {
       try {
-        let result = await performApiCall(mode, file, provider, config, currentKey, systemInstruction, base64Data, isImageOrVideo, settings, signal);
+        let result = await performApiCall(mode, file, provider, config, currentKey, systemInstruction, base64Data, isImageOrVideo, settings, signal, mediaMimeType);
         
         // Forced single-word keyword sanitization if enabled
         if (mode === 'metadata' && settings.singleWordKeywords && result.keywords) {
@@ -353,10 +333,21 @@ export async function processMedia(
         } else if (mode === 'prompt') {
           let promptClean = stripPlaceholders(result.prompt || '');
           promptClean = promptClean.replace(/^(?:\*\*.*?\*\*|\*.*?\*|#{1,6}\s*.*?\n|Prompt:|Image Prompt:|Suggested Prompt:|(?:Here is|Here's).*?:)\s*/i, '');
+          promptClean = removeCommercialWord(promptClean);
           promptClean = promptClean.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
           result.prompt = promptClean;
+          if (result.detectedSubject) result.detectedSubject = removeCommercialWord(result.detectedSubject);
+          if (result.detectedStyle) result.detectedStyle = removeCommercialWord(result.detectedStyle);
         }
         
+        // Final pass: ensure strict zero usage of the word "commercial"
+        if (result.title) result.title = removeCommercialWord(result.title);
+        if (result.description) result.description = removeCommercialWord(result.description);
+        if (result.keywords) result.keywords = removeCommercialWord(result.keywords);
+        if (result.prompt) result.prompt = removeCommercialWord(result.prompt);
+        if (result.detectedSubject) result.detectedSubject = removeCommercialWord(result.detectedSubject);
+        if (result.detectedStyle) result.detectedStyle = removeCommercialWord(result.detectedStyle);
+
         if ((i > 0 || failedKeys.length > 0 || invalidKeys.length > 0) && onKeyUpdate) {
           onKeyUpdate(provider, currentKey, failedKeys, invalidKeys);
         }
@@ -383,7 +374,7 @@ export async function processMedia(
 
         if ((isRateLimit || isServerBusy || isQuotaError) && retryCount < MAX_RETRIES_PER_KEY) {
           retryCount++;
-          await sleep(1500);
+          await sleep(2000 * retryCount);
           continue;
         }
         
@@ -392,39 +383,11 @@ export async function processMedia(
     }
   }
 
-  // Fail-Safe Generation: If AI provider is unavailable or quota exceeded,
-  // seamlessly generate metadata or prompt using Apify or our local engine with ZERO errors.
-  if (mode === 'metadata') {
-    try {
-      const apifyResult = await generateMetadataFromApify(
-        file,
-        settings.platform,
-        settings.keywordWords,
-        settings.singleWordKeywords
-      );
-      return {
-        ...apifyResult,
-        usedKeyIndex: 1,
-        usedKeyName: isApifyConfigured() ? 'Apify Microstock' : 'Market Engine'
-      };
-    } catch (apifyErr) {
-      console.warn('Apify metadata generation fallback:', apifyErr);
-      return generateFallbackResult(file, mode, settings);
-    }
-  }
-
-  // Fail-safe for prompt mode as well
-  try {
-    const apifyPrompt = await generatePromptFromApify(file, settings);
-    return {
-      ...apifyPrompt,
-      usedKeyIndex: 1,
-      usedKeyName: isApifyConfigured() ? 'Apify Microstock' : 'Market Engine'
-    };
-  } catch (promptErr) {
-    console.warn('Apify prompt generation fallback:', promptErr);
-    return generateFallbackResult(file, mode, settings);
-  }
+  // Authentic AI Vision Requirement:
+  // If AI vision processing fails after all retries across models and keys,
+  // DO NOT fake results by inventing prompts from filename hashes!
+  // Throwing the error ensures the user can retry the file with 1 click to get authentic visual results.
+  throw lastError || new Error(`AI vision analysis was temporarily unable to process "${file.name}". Please click retry.`);
 }
 
 /**
@@ -476,10 +439,35 @@ const STOCK_TRADEMARK_MAP: [RegExp, string][] = [
 /**
  * Words that cause reviewer rejection under "Keyword Spamming" or "Subjective / Fluff Tags"
  */
-const BANNED_SPAM_WORDS_REGEX = /\b(beautiful|stunning|amazing|gorgeous|cute|nice|great|masterpiece|best|perfect|cool|unique|hd|4k|8k|1080p|alpha|wallpaper|download|free download|free|buy|sale|top seller|trending|popular search|click here|check out|unreal engine|octane render|high resolution|high quality|photorealistic|ultra realistic|hyperrealistic|realistic|sharp focus)\b/gi;
+const BANNED_SPAM_WORDS_REGEX = /\b(commercial|commercial use|beautiful|stunning|amazing|gorgeous|cute|nice|great|masterpiece|best|perfect|cool|unique|hd|4k|8k|1080p|alpha|wallpaper|download|free download|free|buy|sale|top seller|trending|popular search|click here|check out|unreal engine|octane render|high resolution|high quality|photorealistic|ultra realistic|hyperrealistic|realistic|sharp focus)\b/gi;
 
 /**
- * Strips trademarks, spam words, and invalid punctuation to ensure 100% submission safety
+ * Strips all occurrences of the word "commercial" or phrases containing "commercial"
+ * to comply strictly with contributor submission rules and prevent stock rejection.
+ */
+export function removeCommercialWord(text: string): string {
+  if (!text) return '';
+  let str = text;
+  str = str.replace(/\bcommercial\s+studio\s+photography\s+of\b/gi, 'Studio photography of');
+  str = str.replace(/\bcommercial\s+photography\s+of\b/gi, 'Photography of');
+  str = str.replace(/\bcommercial\s+product\s+photography\b/gi, 'Studio product photography');
+  str = str.replace(/\bcommercial\s+studio\s+photography\b/gi, 'Studio photography');
+  str = str.replace(/\bcommercial\s+photography\b/gi, 'Studio photography');
+  str = str.replace(/\bcommercial\s+product\s+photograph\b/gi, 'Studio product photograph');
+  str = str.replace(/\bcommercial\s+studio\b/gi, 'Studio');
+  str = str.replace(/\bcommercial\s+advertising\b/gi, 'Advertising');
+  str = str.replace(/\bcommercial\s+merchandise\b/gi, 'Merchandise');
+  str = str.replace(/\bcommercial\s+use\b/gi, '');
+  str = str.replace(/\bcommercial\s+visual\s+asset\b/gi, 'Visual asset');
+  str = str.replace(/\bcommercial\s+asset\b/gi, 'Visual asset');
+  str = str.replace(/\bcommercial\s+stock\b/gi, 'Stock');
+  str = str.replace(/\bcommercial\b/gi, '');
+  str = str.replace(/\s{2,}/g, ' ').replace(/,\s*,/g, ',').replace(/\s+([.,;])/g, '$1').trim();
+  return str;
+}
+
+/**
+ * Strips trademarks, spam words, commercial references, and invalid punctuation to ensure 100% submission safety
  */
 export function sanitizeStockText(text: string): string {
   if (!text) return '';
@@ -490,9 +478,11 @@ export function sanitizeStockText(text: string): string {
     cleaned = cleaned.replace(pattern, replacement);
   }
 
-  // 2. Remove spam adjectives and strictly forbidden redundant phrases
-  cleaned = cleaned.replace(/High\s+Resolution\s+Commercial\s+Stock\s+Photography\s+of\s+Realistic/gi, 'Commercial Photography of');
+  // 2. Remove spam adjectives, strictly forbidden redundant phrases, and the word 'commercial'
+  cleaned = cleaned.replace(/High\s+Resolution\s+Commercial\s+Stock\s+Photography\s+of\s+Realistic/gi, 'Photography of');
   cleaned = cleaned.replace(/High\s+Resolution\s+Commercial\s+Stock\s+Photography\s+of/gi, 'Professional Photography of');
+  cleaned = cleaned.replace(/Commercial\s+Photography\s+of/gi, 'Photography of');
+  cleaned = removeCommercialWord(cleaned);
   cleaned = cleaned.replace(BANNED_SPAM_WORDS_REGEX, '');
 
   // 3. Remove prohibited special characters that cause stock rejection
@@ -577,23 +567,21 @@ export function orderKeywordsForStockRank(
   // Guaranteed padding from high-ranking commercial stock pool to hit 45 to 50 tags
   const safeTarget = Math.max(45, Math.min(50, targetCount || 50));
   if (rankedCombined.size < safeTarget) {
-    const isGraphicOrVector = tagList.some(t => /vector|illustration|graphic|t-shirt|shirt|apparel|logo|badge|emblem|sticker|icon|drawing|clipart/i.test(t)) ||
-                              /vector|illustration|graphic|svg|eps|ai|design|badge|logo|shirt|print/i.test(seedSubject);
+    const isGraphicOrVector = tagList.some(t => /vector|illustration|graphic|drawing|clipart|icon|logo/i.test(t)) ||
+                              /vector|illustration|graphic|svg|eps|ai|design|icon|drawing/i.test(seedSubject);
 
     const vectorDesignBackup = [
-      'vector', 'illustration', 'graphic design', 'commercial use', 'artwork',
-      't-shirt design', 'print ready', 'merchandise', 'sticker', 'scalable',
-      'digital art', 'creative asset', 'branding', 'visual element', 'template',
-      'apparel', 'emblem', 'badge', 'eps', 'crisp detail', 'screen printing',
-      'editorial', 'contemporary', 'decorative', 'detail', 'symbol', 'icon',
-      'line art', 'sublimation', 'poster', 'banner', 'advertising', 'marketing',
-      'presentation', 'social media', 'creative design', 'concept', 'silhouette',
-      'monochrome', 'clean background', 'print design', 'clip art', 'decal',
-      'drawing', 'isolated', 'vintage', 'modern', 'clothing', 'creative resource'
+      'vector', 'illustration', 'graphic design', 'creative design', 'artwork',
+      'scalable', 'digital art', 'creative asset', 'branding', 'visual element',
+      'template', 'clipart', 'line art', 'drawing', 'isolated', 'clean background',
+      'symbol', 'icon', 'detail', 'crisp lines', 'monochrome', 'outline',
+      'decorative', 'contemporary', 'modern style', 'creative asset', 'concept',
+      'poster', 'banner', 'advertising', 'marketing', 'presentation', 'social media',
+      'print ready', 'graphic', 'visual identity', 'creative resource'
     ];
 
     const photoBackup = [
-      'photography', 'studio shot', 'isolated', 'commercial use', 'clean background',
+      'photography', 'studio shot', 'isolated', 'clean background',
       'professional', 'composition', 'lighting', 'crisp detail', 'visual asset',
       'concept', 'advertising', 'marketing', 'presentation', 'banner', 'editorial',
       'contemporary', 'branding', 'social media', 'detail', 'texture', 'natural',
@@ -630,30 +618,26 @@ export function ensureRichMetadata(result: GeneratedResult, file: File, settings
     t = sanitizeStockText(result.description.split('.')[0] || '');
   }
   if (!t) {
-    const cleanSubject = baseSeed.split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w)).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).filter(w => !/^realistic$/i.test(w)).join(' ') || (isVector ? 'Vector Graphic Artwork' : 'Commercial Stock Artwork');
+    const cleanSubject = baseSeed.split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w)).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).filter(w => !/^realistic$/i.test(w)).join(' ') || (isVector ? 'Graphic Artwork' : 'Stock Asset');
     t = isVector
-      ? `Detailed Vector Graphic Illustration of ${cleanSubject} for T-Shirt Design, Apparel Print, Sticker, Poster, and Commercial Merchandise`
-      : `Professional Commercial Photography of ${cleanSubject} with Crisp Composition and Balanced Studio Lighting for Marketing and Advertising`;
+      ? `Detailed Vector Illustration of ${cleanSubject} with Balanced Composition and Crisp Outlines for Marketing and Creative Design`
+      : `Studio Photography of ${cleanSubject} with Crisp Composition and Balanced Studio Lighting for Marketing and Advertising`;
   }
 
   const words = t.split(/\s+/).filter(Boolean);
 
-  // If title is under 18 words, enrich it with natural commercial buyer usage matching the design
+  // If title is under 18 words, enrich it with natural buyer usage matching the design
   if (words.length < 18 || t.length < 110) {
     const lowerT = t.toLowerCase();
-    const isDesign = isVector || /vector|illustration|graphic|badge|emblem|logo|t-shirt|shirt|apparel|sticker|icon|drawing|clipart/i.test(lowerT);
+    const isDesign = isVector || /vector|illustration|graphic|drawing|clipart/i.test(lowerT);
     
-    const hasUsage = /t-shirt|apparel|merchandise|print|sticker|poster|banner|advertising|marketing|branding/i.test(lowerT);
-    const hasFormat = /vector|illustration|graphic|design|photo|photography|render/i.test(lowerT);
+    const hasUsage = /advertising|marketing|branding|presentation|editorial|media|campaign|website|banner/i.test(lowerT);
 
     const additions: string[] = [];
-    if (!hasFormat) {
-      additions.push(isDesign ? 'Vector Graphic Illustration' : 'Commercial Studio Photography');
-    }
     if (!hasUsage) {
-      additions.push(isDesign ? 'for T-Shirt Print, Sticker, Poster, and Commercial Merchandise Design' : 'for Commercial Advertising, Editorial Media, and Web Marketing Campaigns');
+      additions.push(isDesign ? 'for Advertising, Creative Branding, and Digital Media Campaigns' : 'for Advertising, Corporate Media, and Web Marketing Campaigns');
     } else if (words.length < 14) {
-      additions.push(isDesign ? 'Suitable for Creative Apparel, Merchandise, and Digital Design Projects' : 'Suitable for Corporate Marketing, Advertising Banners, and Digital Media');
+      additions.push('Suitable for Creative Marketing Banners, Website Content, and Editorial Publishing');
     }
 
     if (additions.length > 0) {
@@ -708,50 +692,63 @@ export function ensureRichMetadata(result: GeneratedResult, file: File, settings
   return result;
 }
 
+function extractCleanStockSubject(fileName: string, isVector: boolean): string {
+  let clean = fileName.replace(/\.[^/.]+$/, '');
+  clean = clean.replace(/^(360_F|AdobeStock|Depositphotos|Shutterstock|iStock|FT|ID)[-_]?\d+[-_]?/gi, '');
+  clean = clean.replace(/\(\d+\)/g, ' ').replace(/\[\d+\]/g, ' ');
+  const tokens = clean.split(/[-_.\s]+/).filter(Boolean);
+  const validWords = tokens.filter(t => {
+    if (/^\d+$/.test(t)) return false;
+    if (t.length <= 2) return false;
+    if (t.length > 15) return false;
+    if (/[a-zA-Z]/.test(t) && /\d/.test(t) && t.length > 6) return false;
+    if (/^(img|dsc|photo|pic|image|file|asset|stock|vector|thumb|preview|comp)$/i.test(t)) return false;
+    return true;
+  });
+  if (validWords.length === 0) {
+    return isVector ? 'Vector Graphic Artwork' : 'Stock Asset';
+  }
+  return validWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+}
+
 function generateFallbackResult(file: File, mode: AppMode, settings: GenerationSettings): GeneratedResult {
   const isVectorFile = file.type.startsWith('image/svg') || file.name.endsWith('.svg') || file.name.endsWith('.eps') || file.name.endsWith('.ai');
-  const cleanBaseName = file.name
-    .replace(/\.[^/.]+$/, '')
-    .replace(/\(\d+\)/g, '')
-    .replace(/[-_]/g, ' ')
-    .replace(/\b(img|dsc|photo|pic|image|file|\d+)\b/gi, '')
-    .trim();
-  const lowerName = cleanBaseName.toLowerCase();
-  const words = cleanBaseName.split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w));
-  const capitalized = words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ') || (isVectorFile ? 'Vector Graphic Artwork' : 'Commercial Stock Artwork');
+  const capitalized = extractCleanStockSubject(file.name, isVectorFile);
+  const lowerName = file.name.toLowerCase();
+  const words = capitalized.toLowerCase().split(/\s+/).filter(Boolean);
 
   if (mode === 'metadata') {
     const isVectorFile = file.type.startsWith('image/svg') || file.name.endsWith('.svg') || file.name.endsWith('.eps') || file.name.endsWith('.ai');
     let category = isVectorFile ? 'Graphics & Design' : 'Visual Assets';
-    let contentType = isVectorFile ? 'Vector / Illustration' : 'Commercial Graphic';
-    let style = 'Commercial Market Design';
+    let contentType = isVectorFile ? 'Vector / Illustration' : 'Stock Graphic';
+    let style = 'Modern Market Design';
     const cleanSubject = capitalized.replace(/^Realistic\s+/i, '');
     let title = isVectorFile
-      ? `Detailed Vector Graphic Illustration of ${cleanSubject} for T-Shirt Design, Apparel Print, Sticker, Poster, and Commercial Merchandise`
-      : `Professional Commercial Photography of ${cleanSubject} with Crisp Composition and Balanced Studio Lighting for Marketing and Advertising`;
-    let description = `Professional commercial visual asset featuring ${capitalized}. Composed with crisp details and high aesthetic appeal. Ideal for t-shirt graphics, apparel merchandise, creative branding, website landing pages, and promotional advertising.`;
+      ? `Detailed Vector Illustration of ${cleanSubject} with Balanced Composition and Crisp Outlines for Creative Design and Advertising`
+      : `Professional Photography of ${cleanSubject} with Crisp Composition and Balanced Studio Lighting for Marketing and Advertising`;
+    let description = `Professional visual asset featuring ${capitalized}. Composed with crisp details and high aesthetic appeal. Ideal for creative branding, website landing pages, presentation banners, and promotional advertising.`;
     
     let subjectKws = [lowerName, ...words.map(w => w.toLowerCase())];
     let mediumKws = isVectorFile 
       ? ['vector', 'illustration', 'graphic design', 'artwork', 'scalable', 'eps', 'line art', 'drawing', 'isolated', 'digital art', 'print ready']
-      : ['photography', 'studio shot', 'isolated', 'high resolution', 'commercial use', 'composition', 'lighting', 'visual asset'];
-    let themeKws = ['creative', 'commercial', 'lifestyle', 'concept', 'modern style', 'trend', 'inspiration', 'contemporary', 'decorative', 'detail', 'symbol', 'identity'];
-    let commercialKws = ['t-shirt design', 'apparel', 'print', 'merchandise', 'sticker', 'emblem', 'badge', 'banner', 'template', 'marketing', 'advertising', 'presentation', 'social media', 'poster', 'branding', 'screen printing', 'sublimation', 'pod', 'print on demand'];
+      : ['photography', 'studio shot', 'isolated', 'composition', 'lighting', 'visual asset', 'professional'];
+    let themeKws = ['creative', 'lifestyle', 'concept', 'modern style', 'trend', 'inspiration', 'contemporary', 'decorative', 'detail', 'symbol', 'identity'];
+    let commercialKws = ['marketing', 'advertising', 'presentation', 'social media', 'poster', 'branding', 'banner', 'website', 'template', 'editorial', 'digital media'];
 
     if (/skull|biker|motorcycle|garage|chopper|mechanic|rider|engine|piston|vintage|retro/i.test(lowerName)) {
-      category = 'Vintage & Streetwear';
+      category = 'Vintage & Retro';
       contentType = 'Vector Graphic';
-      style = 'Vintage Biker Apparel Graphic';
-      title = `Vintage Motorcycle and Skull Emblem Illustration with Biker Wings and Wrenches for T-Shirt Design, Apparel Print, and Merchandise`;
-      description = `Vintage hand-drawn biker motorcycle graphic featuring skull and mechanical elements. Perfect for retro streetwear t-shirts, motorcycle club emblems, garage banners, stickers, and screen printing.`;
+      style = 'Vintage Retro Emblem Graphic';
+      title = `Vintage Motorcycle and Skull Emblem Illustration with Balanced Retro Wings and Geometric Elements for Branding and Posters`;
+      description = `Vintage retro graphic featuring skull and mechanical motorcycle elements. Suitable for retro emblems, garage banners, posters, and print media.`;
       subjectKws = ['skull', 'motorcycle', 'biker', 'rider', 'chopper', 'skeleton', 'bones', 'garage', 'mechanic', 'engine'];
       mediumKws = ['vector', 'illustration', 'line art', 'distressed', 'vintage', 'retro', 'hand drawn', 'engraving', 'monochrome', 'badge', 'emblem', 'patch'];
       themeKws = ['custom culture', 'rebel', 'rock', 'racing', 'speed', 'classic', 'old school', 'hardcore', 'biker club', 'tattoo style'];
-      commercialKws = ['t-shirt design', 'apparel', 'streetwear', 'clothing', 'merchandise', 'screen printing', 'sublimation', 'sticker', 'decal', 'pod', 'print on demand'];
+      commercialKws = ['poster', 'branding', 'banner', 'merchandise', 'sticker', 'decal', 'print', 'digital asset'];
     } else if (/coffee|espresso|cup|drink|tea|cafe|beverage|mug/i.test(lowerName)) {
       category = 'Food and Drink';
       contentType = 'Photo';
-      style = 'Commercial Food Photography';
+      style = 'Food Photography';
       title = `Overhead flat lay of freshly roasted aromatic coffee beans and ceramic cup on rustic wooden table with copy space`;
       description = `Overhead flat lay of freshly brewed coffee in a ceramic cup surrounded by roasted beans on a natural rustic table. Perfect for cafe branding, restaurant menus, culinary websites, and morning lifestyle advertising.`;
       subjectKws = ['coffee', 'coffee cup', 'coffee beans', 'espresso', 'caffeine', 'mug', 'roasted beans', 'hot drink', 'beverage', 'cafe'];
@@ -789,7 +786,7 @@ function generateFallbackResult(file: File, mode: AppMode, settings: GenerationS
     // Combine into clean, non-duplicate keywords
     const rawKeywords = Array.from(new Set([...subjectKws, ...mediumKws, ...themeKws, ...commercialKws]))
       .map(k => k.trim().toLowerCase())
-      .filter(k => k.length > 1 && !/beautiful|amazing|stunning|best|unique|hd|4k|alpha/i.test(k));
+      .filter(k => k.length > 1 && !/beautiful|amazing|stunning|best|unique|hd|4k|alpha|commercial/i.test(k));
     
     const finalKeywords = rawKeywords.slice(0, settings.keywordWords || 50).join(', ');
 
@@ -804,9 +801,9 @@ function generateFallbackResult(file: File, mode: AppMode, settings: GenerationS
     }
 
     return {
-      title: finalTitle,
-      description: finalDescription,
-      keywords: finalKeywords,
+      title: removeCommercialWord(finalTitle),
+      description: removeCommercialWord(finalDescription),
+      keywords: removeCommercialWord(finalKeywords),
       category,
       contentType,
       style,
@@ -814,17 +811,17 @@ function generateFallbackResult(file: File, mode: AppMode, settings: GenerationS
       approvalRisk: {
         riskLevel: 'Low',
         possibleIssues: ['None detected'],
-        improvementSuggestions: ['Include high-contrast copy space to maximize commercial conversions for agency buyers.']
+        improvementSuggestions: ['Include high-contrast copy space to maximize conversions for agency buyers.']
       },
-      uploadNotes: 'High commercial appeal. Recommended for Adobe Stock, Shutterstock, and Freepik submissions.',
+      uploadNotes: 'High market appeal. Recommended for Adobe Stock, Shutterstock, and Freepik submissions.',
       usedProvider: 'google-ai-studio',
       usedModel: 'gemini-flash-auto'
     };
   } else {
     return {
       detectedSubject: capitalized,
-      detectedStyle: 'Commercial Studio Photography & Digital Vector Art',
-      prompt: `High-end commercial studio asset featuring ${capitalized}, cinematic lighting, crisp optical detail, clean minimalist background, professional color grading, stock photography excellence.`,
+      detectedStyle: 'Studio Photography & Digital Vector Art',
+      prompt: `High-end studio asset featuring ${capitalized}, cinematic lighting, crisp optical detail, clean minimalist background, professional color grading, stock photography excellence.`,
       negativePrompt: 'blurry, low quality, distorted, watermark',
       usedProvider: 'google-ai-studio',
       usedModel: 'gemini-flash-auto'
@@ -846,9 +843,9 @@ function generateSystemInstruction(mode: AppMode, file: File, settings: Generati
 ### MANDATORY PLATFORM DIRECTIVE: ADOBE STOCK
 - Adobe Stock submission strictly requires: TITLE and KEYWORDS.
 - Do NOT generate description. Set "description": "" (empty string).
-- Focus 100% on generating an elite, comprehensive, and longer commercial TITLE (target ~${Math.max(24, settings.titleWords || 25)} words, strictly 20 to 30 words, approx 120–190 characters) rich in visual detail and buyer search intent, and at least 45 to 50 search-optimized KEYWORDS (strictly 40+ keywords, never fewer than 40).`;
+- Focus 100% on generating an elite, comprehensive, and longer stock TITLE (target ~${Math.max(24, settings.titleWords || 25)} words, strictly 20 to 30 words, approx 120–190 characters) rich in visual detail and buyer search intent, and at least 45 to 50 search-optimized KEYWORDS (strictly 40+ keywords, never fewer than 40). Zero usage of the word "commercial".`;
       jsonTemplate = `{
-  "title": "Detailed comprehensive commercial stock title following the formula strictly between 20 and 30 words",
+  "title": "Detailed comprehensive stock title following the formula strictly between 20 and 30 words without the word commercial",
   "keywords": "keyword1, keyword2, keyword3, keyword4, ... (at least 45 to 50 keywords)",
   "description": "",
   "category": "Primary Stock Category",
@@ -861,10 +858,10 @@ function generateSystemInstruction(mode: AppMode, file: File, settings: Generati
 ### MANDATORY PLATFORM DIRECTIVE: SHUTTERSTOCK
 - Shutterstock contributor submission strictly requires: DESCRIPTION and KEYWORDS.
 - Shutterstock does NOT use a separate Title field. Do NOT generate title. Set "title": "" (empty string).
-- Focus 100% on generating a comprehensive, high-converting commercial DESCRIPTION / CAPTION (target ~${Math.max(30, settings.descriptionWords || 32)} words, approx 130–220 characters) thoroughly explaining the visual scene, subject, composition, and commercial utility, followed by at least 45 to 50 search-optimized KEYWORDS (strictly 40+ keywords).`;
+- Focus 100% on generating a comprehensive, high-converting DESCRIPTION / CAPTION (target ~${Math.max(30, settings.descriptionWords || 32)} words, approx 130–220 characters) thoroughly explaining the visual scene, subject, composition, and buyer utility, followed by at least 45 to 50 search-optimized KEYWORDS (strictly 40+ keywords). Zero usage of the word "commercial".`;
       jsonTemplate = `{
   "title": "",
-  "description": "Professional comprehensive commercial description detailing visual composition, subject matter, and buyer applications in 30 to 45 words.",
+  "description": "Professional comprehensive description detailing visual composition, subject matter, and buyer applications in 30 to 45 words without the word commercial.",
   "keywords": "keyword1, keyword2, keyword3, keyword4, ... (at least 45 to 50 keywords)",
   "category": "Primary Stock Category",
   "contentType": "Vector | Illustration | Photo | 3D Render",
@@ -876,9 +873,9 @@ function generateSystemInstruction(mode: AppMode, file: File, settings: Generati
 ### MANDATORY PLATFORM DIRECTIVE: FREEPIK
 - Freepik contributor platform strictly requires: TITLE and KEYWORDS.
 - Do NOT generate description. Set "description": "" (empty string).
-- Focus 100% on generating an elite, comprehensive, and longer commercial TITLE (target ~${Math.max(24, settings.titleWords || 25)} words, strictly 20 to 30 words, approx 120–190 characters) rich in visual detail and buyer search intent, and at least 45 to 50 search-optimized KEYWORDS (strictly 40+ keywords, never fewer than 40).`;
+- Focus 100% on generating an elite, comprehensive, and longer stock TITLE (target ~${Math.max(24, settings.titleWords || 25)} words, strictly 20 to 30 words, approx 120–190 characters) rich in visual detail and buyer search intent, and at least 45 to 50 search-optimized KEYWORDS (strictly 40+ keywords, never fewer than 40). Zero usage of the word "commercial".`;
       jsonTemplate = `{
-  "title": "Detailed comprehensive commercial stock title following the formula strictly between 20 and 30 words",
+  "title": "Detailed comprehensive stock title following the formula strictly between 20 and 30 words without the word commercial",
   "keywords": "keyword1, keyword2, keyword3, keyword4, ... (at least 45 to 50 keywords)",
   "description": "",
   "category": "Primary Stock Category",
@@ -890,10 +887,10 @@ function generateSystemInstruction(mode: AppMode, file: File, settings: Generati
       platformDirectives = `
 ### MANDATORY PLATFORM DIRECTIVE: GENERAL / ALL MARKETS
 - General Stock strictly requires: TITLE, KEYWORDS, and DESCRIPTION.
-- Provide all three complete fields: comprehensive, longer high-converting TITLE (target ~${Math.max(24, settings.titleWords || 25)} words, strictly 20 to 30 words, approx 120–190 characters), search-optimized KEYWORDS (at least 45 to 50 tags, strictly 40+ keywords), and thorough commercial DESCRIPTION.`;
+- Provide all three complete fields: comprehensive, longer high-converting TITLE (target ~${Math.max(24, settings.titleWords || 25)} words, strictly 20 to 30 words, approx 120–190 characters), search-optimized KEYWORDS (at least 45 to 50 tags, strictly 40+ keywords), and thorough stock DESCRIPTION. Zero usage of the word "commercial".`;
       jsonTemplate = `{
-  "title": "Detailed comprehensive commercial stock title following the formula strictly between 20 and 30 words",
-  "description": "Professional comprehensive two sentence description detailing visual composition and commercial buyer applications.",
+  "title": "Detailed comprehensive stock title following the formula strictly between 20 and 30 words without the word commercial",
+  "description": "Professional comprehensive two sentence description detailing visual composition and buyer applications without the word commercial.",
   "keywords": "keyword1, keyword2, keyword3, keyword4, ... (at least 45 to 50 keywords)",
   "category": "Primary Stock Category",
   "contentType": "Vector | Illustration | Photo | 3D Render",
@@ -906,19 +903,21 @@ function generateSystemInstruction(mode: AppMode, file: File, settings: Generati
 # ${platformHeader}
 # ============================================================
 
-ROLE & COMMERCIAL MISSION:
-You are an elite microstock contributor director and top-earning commercial SEO architect. Your metadata is engineered to achieve TOP-SELLER status, high search impressions, maximum click-through rates (CTR), and zero rejections across Adobe Stock, Freepik, Shutterstock, and Getty Images.
+ROLE & METADATA MISSION:
+You are an elite microstock contributor director and top-earning stock SEO architect. Your metadata is engineered to achieve TOP-SELLER status, high search impressions, maximum click-through rates (CTR), and zero rejections across Adobe Stock, Freepik, Shutterstock, and Getty Images.
 
 CRITICAL REVIEWER SAFETY & ZERO-REJECTION PROTOCOL:
-1. ZERO TRADEMARKS (Top Cause of Stock Account Warnings & Immediate Rejection):
-   - NEVER use trademarked brand names, logos, or commercial products (e.g. Apple, iPhone, iPad, Mac, Nike, Adidas, Tesla, Porsche, BMW, Sony, Playstation, Xbox, Nintendo, Instagram, Facebook, TikTok, YouTube, Photoshop, Canva, Lego, Barbie, Disney, Marvel).
+1. STRICT BANNED WORD RULE:
+   - NEVER use the word "Commercial" or "commercial" anywhere in the title, description, or keywords! Microstock agencies reject metadata with this word.
+2. ZERO TRADEMARKS (Top Cause of Stock Account Warnings & Immediate Rejection):
+   - NEVER use trademarked brand names, logos, or brand products (e.g. Apple, iPhone, iPad, Mac, Nike, Adidas, Tesla, Porsche, BMW, Sony, Playstation, Xbox, Nintendo, Instagram, Facebook, TikTok, YouTube, Photoshop, Canva, Lego, Barbie, Disney, Marvel).
    - Use generic descriptive terms ONLY (e.g. smartphone, mobile device, touchscreen tablet, athletic sportswear, luxury sports car, image editing software, cartoon character).
-2. ZERO PROHIBITED SPAM & SUBJECTIVE FILLER:
+3. ZERO PROHIBITED SPAM & SUBJECTIVE FILLER:
    - Forbid fluff hype: "beautiful", "stunning", "amazing", "great", "nice", "modern", "cool", "unique", "best", "perfect", "hd", "4k", "8k", "wallpaper", "masterpiece", "top seller", "trending", "download", "free", "sale".
-3. PLATFORM FORMATTING COMPLIANCE:
+4. PLATFORM FORMATTING COMPLIANCE:
    - NO trailing period (.) or ellipsis (...) at the end of titles (Adobe Stock rejects titles ending with periods).
    - Clean alphanumeric text only (no <>, {}, [], ~, *, ^, #, @).
-4. AUTHENTIC VISUAL TRUTH MANDATE:
+5. AUTHENTIC VISUAL TRUTH MANDATE:
    - Analyze ONLY the actual visual elements, subject matter, composition, and style visible in the uploaded image.
    - Do NOT hallucinate unseen people, trademarks, logos, objects, or locations.
    - Ground every single keyword and title element in authentic visual reality.
@@ -928,51 +927,51 @@ ${platformDirectives}
 
 ---
 
-### 1. TITLE ARCHITECTURE (Market-Based Top-Seller Commercial SEO):
+### 1. TITLE ARCHITECTURE (Market-Based Top-Seller Stock SEO):
 - Front-Load Primary Subject: The first 3 to 5 words carry the highest algorithmic weight on Adobe Stock, Freepik, and Shutterstock. Place the most critical, high-search-volume subject nouns right at the beginning!
-- Match the Actual Design & Graphic:
-  1. Hero Subject: Identify EXACTLY what is illustrated or photographed (e.g. vintage skull, roaring tiger, motorcycle, barista coffee cup, cybersecurity lock, floral pattern).
-  2. Embedded Typography / Slogans: If the artwork contains ANY text, slogan, or quote (e.g. "Ride Free", "Summer Vibes", "Merry Christmas", "Coffee House 1982"), extract it verbatim and include it in quotes or description in the title (e.g. "Vintage Skull Emblem with 'Ride Free' Typography for Biker T-Shirt Design").
-  3. Product Format & Category: Explicitly state the asset type:
-     - Vector T-Shirt Graphic / Apparel Print / Streetwear Merchandise
-     - Vintage Badge / Emblem / Mascot Logo / Shield Crest / Stamp / Patch
-     - Sticker Design / Die-Cut Decal / Clipart
-     - Seamless Vector Pattern / Textile Surface Background
-     - Icon Set / UI Symbols / Glyph Pack
-     - Flat Vector Illustration / Line Art Drawing
-     - Social Media Banner / Flyer / Poster Template / Infographic
-     - Studio Commercial Photography / Food Photography / Lifestyle Photo
-  4. True Background & Composition: State the REAL background (e.g., "isolated on black background", "isolated on white background", "isolated on transparent background", "textured background"). NEVER claim white background if the graphic is on a dark or transparent background!
-- Title Length: Strictly 20 to 30 words, approx 120 to 195 characters. Rich in visual specifics and commercial buyer intent.
-- Format: Sentence case. STRICTLY NO trailing period (.) or ellipsis (...) at the end. Zero brand names.
+- Match the Actual Image & Visual File Content:
+  1. Hero Subject: Identify EXACTLY what is illustrated or photographed (e.g. coffee cup on wooden table, business team in conference room, autumn foliage forest, cute kitten, cybersecurity shield icon, floral pattern).
+  2. Embedded Typography / Slogans: If the artwork contains ANY text, slogan, or quote (e.g. "Summer Vibes", "Merry Christmas", "Coffee House 1982"), extract it verbatim and include it in quotes or description in the title (e.g. "Vintage Emblem with 'Summer Vibes' Typography for Creative Branding").
+  3. Product Format & Category: Explicitly state the authentic asset format:
+     - Vector Graphic Illustration / Line Art Drawing / Icon Set / Mascot Logo
+     - Seamless Vector Pattern / Textile Surface Background / Wallpaper Texture
+     - Social Media Banner / Flyer / Poster Template / Infographic Layout
+     - Studio Photography / Food Photography / Lifestyle Portrait / Landscape
+     - 3D Digital Render / Isometric Asset / CGI Illustration
+  4. True Background & Composition: State the REAL background (e.g. "isolated on white background", "isolated on dark background", "blurred natural bokeh background", "clean studio setup"). NEVER claim white background if the image has a dark, colorful, or natural background!
+  5. ZERO UNRELATED CATEGORIES: NEVER assume or output t-shirt, apparel, biker, or merchandise terms unless the file is explicitly a t-shirt graphic or biker illustration!
+- Title Length: Strictly 20 to 30 words, approx 120 to 195 characters. Rich in visual specifics and buyer search intent.
+- Format: Sentence case. STRICTLY NO trailing period (.) or ellipsis (...) at the end. Zero brand names. Zero usage of the word "commercial".
 - Formula for Vectors / Graphic Designs:
-  [Primary Design Subject & Motifs] + [Embedded Typography/Slogan if any] + [Asset Format (e.g. Vector T-Shirt Graphic, Vintage Badge Emblem, Mascot Logo, Detailed Vector Illustration)] + [Artistic Style & Color Palette] + [Commercial Buyer Applications (e.g. for Apparel Print, Sticker, Poster, and Merchandise Design)]
+  [Primary Design Subject & Motifs] + [Embedded Typography/Slogan if any] + [Asset Format (e.g. Detailed Vector Illustration, Clean Graphic Design, Icon Set)] + [Artistic Style & Color Palette] + [Buyer Applications (e.g. for Creative Branding, Advertising Banners, and Digital Media Campaigns)]
 - Formula for Photography / 3D Renders:
-  [Camera View & Focal Subject] + [Specific Arrangement / Action / Materials] + [Lighting & Setting Atmosphere] + [Commercial Buyer Applications for Advertising, Editorial, and Marketing]
+  [Camera View & Focal Subject] + [Specific Arrangement / Action / Materials] + [Lighting & Setting Atmosphere] + [Buyer Applications for Advertising, Editorial Media, and Web Marketing]
 
 ### 2. DESCRIPTION SPECIFICATIONS (For Shutterstock & Universal Markets):
-- Length: Exactly 2 complete, polished, informative commercial sentences (strictly 30 to 45 words, target ~${Math.max(30, settings.descriptionWords || 32)} words).
+- Length: Exactly 2 complete, polished, informative sentences (strictly 30 to 45 words, target ~${Math.max(30, settings.descriptionWords || 32)} words).
 - Sentence 1: Vividly and accurately describe the subject, arrangement, art medium, lighting, and composition.
-- Sentence 2: Explicitly state commercial utility and target buyer industries (e.g., "Perfect commercial visual asset for corporate presentations, marketing campaigns, editorial publications, web design banners, and digital advertising.").
+- Sentence 2: Explicitly state utility and target buyer industries (e.g., "Perfect visual asset for corporate presentations, marketing campaigns, editorial publications, web design banners, and digital advertising.").
 
 ### 3. ORDERED 40+ TO 50 KEYWORDS ARCHITECTURE (Microstock Algorithmic Search Ranking):
 Microstock search algorithms (Adobe Sensei, Freepik Neural Search, Shutterstock mSearch) evaluate tags in descending order, giving the heaviest weight to the first 10 keywords. You must construct STRICTLY 45 TO 50 KEYWORDS (never fewer than 40 tags) following this precise 5-tier ranking hierarchy:
 
 - TIER 1 (Keywords 1 to 8 — Core Subject, Embedded Words & Direct Synonyms):
-  The exact primary subject seen in the image, its plural form, embedded slogan terms, and direct synonyms (e.g. for a biker skull t-shirt: skull, motorcycle, biker, rider, chopper, skeleton, dead, bones).
+  The exact primary subject seen in the image, its plural form, embedded slogan terms, and direct synonyms.
+  * Example for business meeting photo: business, team, meeting, office, coworkers, collaboration, discussion, corporate.
+  * Example for botanical vector: leaf, plant, nature, flora, botanical, foliage, green, organic.
 - TIER 2 (Keywords 9 to 17 — Visual Anatomy, Objects & Details):
-  Specific visual features, elements, tools, clothing, actions seen in the design (e.g., wrench, piston, wings, helmet, fire, flames, goggles, engine, handlebars).
+  Specific visual features, elements, tools, clothing, actions, and materials seen in the image (e.g. laptop, table, glasses, suits, window, paperwork, chairs).
 - TIER 3 (Keywords 18 to 28 — Art Style, Format & Medium):
-  Exact artistic medium, format, and finish: vector, illustration, t-shirt design, graphic, apparel, print, merchandise, sticker, emblem, badge, scalable, artwork, editable vector, line art, distressed, vintage, eps, print ready.
-- TIER 4 (Keywords 29 to 39 — Commercial Themes, Subculture & Mood):
-  Subculture, genre, lifestyle, and thematic queries (e.g., rebel, garage, mechanic, custom culture, rock, racing, speed, retro, classic, bad boy, hardcore).
+  Exact artistic medium, format, perspective, and lighting: vector, illustration, photography, studio shot, overhead view, close up, flat lay, scalable, isolated, clean background, 3d render.
+- TIER 4 (Keywords 29 to 39 — Themes & Mood):
+  Industry, concept, mood, and lifestyle queries: modern, creative, success, technology, finance, innovation, communication, professional, planning, strategy.
 - TIER 5 (Keywords 40 to ${settings.keywordWords || 50} — Buyer Intent & Production Terms):
-  How designers and buyers will produce this asset: screen printing, sublimation, pod, print on demand, decal, clipart, clothing, fashion, poster, banner, branding, logo, commercial use.
+  How designers and buyers will use this asset: advertising, marketing, presentation, banner, website, template, social media, editorial, visual asset, digital asset.
 
 - FORMAT & FILTERING RULES:
-  * ${settings.singleWordKeywords ? "Every keyword MUST be a SINGLE WORD only (NO multi-word phrases)." : "Use concise single words and established 2-word stock industry terms (e.g., 't-shirt design', 'print ready', 'graphic design', 'line art', 'copy space')."}
+  * ${settings.singleWordKeywords ? "Every keyword MUST be a SINGLE WORD only (NO multi-word phrases)." : "Use concise single words and established 2-word stock industry terms (e.g., 'graphic design', 'line art', 'copy space', 'clean background')."}
   * All lowercase, separated by commas.
-  * STRICTLY FORBIDDEN: Trademarked brand names, competitor names (adobe stock, shutterstock, freepik), subjective fluff ("beautiful", "stunning", "cool", "unique").
+  * STRICTLY FORBIDDEN: The word "commercial" or "Commercial", trademarked brand names, competitor names (adobe stock, shutterstock, freepik), subjective fluff ("beautiful", "stunning", "cool", "unique").
 
 ${settings.silhouette ? "- Special requirement: Include silhouette, backlit, outline, shadow in keywords and metadata.\n" : ""}${settings.transparentBackground ? "- Special requirement: Include transparent background, isolated, cutout, png in keywords and metadata.\n" : ""}${settings.whiteBackground ? "- Special requirement: Include white background, isolated, studio shot in keywords and metadata.\n" : ""}${settings.customPromptEnabled && settings.customPromptText ? `- Contributor custom instruction: ${settings.customPromptText}\n` : ""}
 ---
@@ -997,7 +996,7 @@ ${jsonTemplate}`;
     if (stylePreset === 'vector') {
       styleDirective = `\n★ MANDATORY ART MEDIUM: VECTOR GRAPHICS & APPAREL EMBLEM\n- Enforce: Screen-printed vector t-shirt graphic, distressed woodcut badge emblem, clean die-cut sticker contours, or flat 2D graphic design isolated on a solid background.\n`;
     } else if (stylePreset === 'commercial') {
-      styleDirective = `\n★ MANDATORY ART MEDIUM: COMMERCIAL STUDIO PRODUCT PHOTOGRAPHY\n- Enforce: Commercial catalog still life, tactile travertine stone or minimalist plinth staging, soft directional window light or studio softbox, clean commercial aesthetic.\n`;
+      styleDirective = `\n★ MANDATORY ART MEDIUM: STUDIO PRODUCT PHOTOGRAPHY\n- Enforce: Studio catalog still life, tactile travertine stone or minimalist plinth staging, soft directional window light or studio softbox, clean minimalist aesthetic.\n`;
     } else if (stylePreset === '3d') {
       styleDirective = `\n★ MANDATORY ART MEDIUM: 3D CGI & OCTANE RENDER\n- Enforce: Isometric 3D asset, smooth matte clay / frosted glass / brushed metal shaders, ambient occlusion shadows, raytraced reflections, clean studio environment.\n`;
     } else if (stylePreset === 'illustration') {
@@ -1021,11 +1020,14 @@ The user has turned ON "Same Image Recreation" mode. Your prompt must meticulous
    - State the precise colors and glow dynamics: electric neon cyan linework, glowing turquoise contours, deep navy blue gradient background with subtle central circular backlighting.
    - Describe exact lighting: luminous neon edge glow, volumetric electric light trails, cybernetic circuit accents.
 3. **Exact Art Style, Medium & Finish**:
-   - Replicate the exact visual technique: clean digital vector line art, glowing neon contours on flat dark background, sharp vector edges, smooth futuristic cybernetic aesthetic, minimal corporate tech branding.
+   - Replicate the exact visual technique: clean digital vector line art, glowing neon contours on flat dark background, sharp vector edges, smooth futuristic cybernetic aesthetic, minimal tech branding.
 4. **Exact Composition & Framing**:
    - Centered composition, clean negative space, high contrast, isolated on solid gradient background.
 
-### 3. STRICT ANTI-DEVIATION RULES:
+### 3. STRICT ANTI-DEVIATION & ACCURACY RULES:
+- STRICT BANNED WORD: NEVER use the word "Commercial" or "commercial" anywhere in the prompt, detectedSubject, or detectedStyle!
+- NEVER use filenames, random hash strings, stock photo asset IDs (e.g., 360_F_..., numbers, hashes), or alphanumeric codes as subject names or words in the prompt. Focus 100% on what is visually shown in the image pixels!
+- Accurately identify and describe the REAL art medium: if it is a 3D icon / 3D render, say "3D isometric render with smooth matte surfaces"; if it is a vector graphic or illustration, say "clean 2D vector graphic"; if it is a photo, say "photograph" or "studio photograph". Do NOT call a 3D icon or vector illustration "studio photography"!
 - DO NOT change the perspective, angle, or composition.
 - DO NOT add unrequested background scenery or extraneous objects.
 - DO NOT alter the color scheme, lighting style, or subject identity.
@@ -1033,8 +1035,8 @@ The user has turned ON "Same Image Recreation" mode. Your prompt must meticulous
 - Length: Strictly 45 to 65 words of highly descriptive, high-density visual terminology.
 - Output valid JSON ONLY:
 {
-  "detectedSubject": "Exact core subject (e.g. Glowing Neon Cybernetic AI Head Silhouette)",
-  "detectedStyle": "Exact art style (e.g. Digital Neon Vector Linework)",
+  "detectedSubject": "Exact core subject (e.g. 3D User Avatar Icons with Chat and Checkmark Speech Bubbles)",
+  "detectedStyle": "Exact art style (e.g. 3D Isometric Minimalist Clay Render)",
   "prompt": "Exact 1:1 recreation prompt here (strictly 45 to 65 words)...",
   "negativePrompt": "blurry, low quality, distorted lines, messy glow, text artifacts, complex background, grainy, amateur composition, dull colors"
 }
@@ -1043,18 +1045,18 @@ Do not include any markdown code blocks outside of the JSON object.
     }
 
     return `You are an industry-leading Principal Art Director, Senior Generative AI Prompt Architect, and Creative Visual Director specializing in Midjourney v6.1, Flux.1 Pro, DALL-E 3, and Stable Diffusion 3.5.
-Your objective is to analyze the uploaded visual asset and engineer an exceptionally professional, production-ready image generation prompt (strictly 45 to 65 words) that delivers commercial-grade aesthetic execution.
+Your objective is to analyze the uploaded visual asset and engineer an exceptionally professional, production-ready image generation prompt (strictly 45 to 65 words) that delivers high-grade aesthetic execution.
 ${engineDirective}${styleDirective}
 ### 1. COGNITIVE PIPELINE: DEEP DESIGN COMPREHENSION FIRST
 Execute this cognitive workflow before crafting the prompt:
 1. **Identify the Core Subject & Purpose**:
-   - Determine the exact hero subject, narrative action, and commercial niche of the artwork or photo.
+   - Determine the exact hero subject, narrative action, and theme of the artwork or photo.
    - What is this design specifically about? (e.g. vintage motocross apparel emblem, minimalist organic cosmetic serum bottle, spooky Halloween skull graphic, cozy coffeehouse barista scene, Ramadan Kareem crescent celebration, isometric 3D cloud server icon, cute watercolor nursery animal).
    - If the design contains typography, slogans, emblems, or badges, read and interpret their meaning to ensure the prompt is grounded in that exact concept.
    - Anchor the prompt directly around this hero subject; never wander into generic or unrelated background details.
 2. **Classify Artistic Medium & Pipeline Accurately**:
    - **Graphic Design & Apparel**: "Screen-printed vintage vector t-shirt graphic", "distressed woodcut badge emblem", "clean die-cut sticker illustration with bold contours", "flat 2D vector graphic isolated on a solid background".
-   - **Commercial Catalog & Editorial Photography**: "Studio commercial product photography", "macro still life with tactile surfaces", "editorial lifestyle portrait", "architectural interior".
+   - **Studio Catalog & Editorial Photography**: "Studio product photography", "macro still life with tactile surfaces", "editorial lifestyle portrait", "architectural interior".
    - **3D Render & CGI**: "Isometric 3D icon in Octane render", "stylized 3D clay-render character", "glossy acrylic, frosted glass and brushed metal shaders with raytraced reflections".
    - **Digital Art & Illustration**: "Atmospheric watercolor wash on textured paper", "gilded Art Nouveau concept illustration", "painterly digital concept art with dynamic brushstrokes".
 
@@ -1066,13 +1068,14 @@ Structure the prompt following the authoritative prompt formula:
 - **Use Tangible Physics & Art Terminology**:
   - Instead of generic lighting: specify "soft directional morning window light", "subtle volumetric rim lighting", "diffused studio softbox with gentle fill ratio", or "dramatic chiaroscuro contrast".
   - Instead of generic quality words: describe physical materials like "frosted amber glass", "tactile cold-press paper grain", "brushed aluminum", "textured linen", "clean vector linework".
-- **Strictly Banned Amateur Buzzwords**:
+- **Strictly Banned Amateur Buzzwords & Words**:
+  - NEVER use the word "Commercial" or "commercial"! (Banned word).
   - NEVER use: "photorealistic", "hyperrealistic", "stunning", "beautiful", "8k", "ultra detailed", "masterpiece", "trending on artstation", "award winning".
   - NEVER use conversational filler: Do NOT start with "A prompt for...", "Image depicting...", "Here is an image...", or "An artwork featuring...". Begin immediately with the subject or medium descriptor.
   - NEVER use camera brand names or lens models ("shot on Sony A7", "35mm f/1.8", "DSLR"). Instead, describe optical behavior ("shallow depth of field with creamy circular bokeh", "crisp edge-to-edge optical sharpness").
 
 ### 4. INSPIRATION & STOCK COPYRIGHT-SAFE RECREATION PROTOCOL
-${isExactMode ? `- 1:1 EXACT RECREATION: Capture and reproduce every visual feature, exact subject, geometry, and composition of this reference image with 100% forensic accuracy.` : `- THEMATIC FIDELITY WITHOUT COPYRIGHT INFRINGEMENT: Adhere strictly to the core theme, subject, props, and visual atmosphere of the reference image. However, engineer an original commercial composition with fresh lighting and staging so that the resulting AI generation is a brand-new, unique commercial asset that will NEVER trigger copyright, duplicate, or similarity strikes on Adobe Stock, Freepik, or Shutterstock.`}
+${isExactMode ? `- 1:1 EXACT RECREATION: Capture and reproduce every visual feature, exact subject, geometry, and composition of this reference image with 100% forensic accuracy.` : `- THEMATIC FIDELITY WITHOUT COPYRIGHT INFRINGEMENT: Adhere strictly to the core theme, subject, props, and visual atmosphere of the reference image. However, engineer an original composition with fresh lighting and staging so that the resulting AI generation is a brand-new, unique asset that will NEVER trigger copyright, duplicate, or similarity strikes on Adobe Stock, Freepik, or Shutterstock.`}
 
 ### 5. STRICT FORMATTING & OUTPUT RULES
 - Length: Strictly 45 to 65 words. Every single word must carry visual weight.
@@ -1089,15 +1092,15 @@ Example (Apparel/Graphic Design):
 {
   "detectedSubject": "Vintage Roaring Grizzly Mountain Apparel Badge",
   "detectedStyle": "Screen-Printed Distressed Vector Linework",
-  "prompt": "A vintage retro t-shirt emblem featuring a majestic roaring grizzly bear inside an arched outdoor circular badge, flanked by tall pine trees and distant mountain peaks, distressed woodcut lineart vector style, warm earthy amber and forest green tones, clean dark background, bold commercial apparel design.",
+  "prompt": "A vintage retro t-shirt emblem featuring a majestic roaring grizzly bear inside an arched outdoor circular badge, flanked by tall pine trees and distant mountain peaks, distressed woodcut lineart vector style, warm earthy amber and forest green tones, clean dark background, bold graphic apparel design.",
   "negativePrompt": "blurry, low quality, distorted typography, duplicate elements, photorealistic, amateur render"
 }
 
-Example (Commercial Photography):
+Example (Product Photography):
 {
   "detectedSubject": "Minimalist Skincare Serum Dropper Bottle",
-  "detectedStyle": "Commercial Catalog Still Life Photography",
-  "prompt": "High-end commercial studio product photograph of a minimalist amber glass serum dropper bottle resting on a chiseled light travertine stone pedestal, delicate botanical fern shadow dancing across the scene, soft directional morning sunlight, creamy neutral beige palette, elegant editorial catalog aesthetic.",
+  "detectedStyle": "Studio Catalog Still Life Photography",
+  "prompt": "High-end studio product photograph of a minimalist amber glass serum dropper bottle resting on a chiseled light travertine stone pedestal, delicate botanical fern shadow dancing across the scene, soft directional morning sunlight, creamy neutral beige palette, elegant editorial catalog aesthetic.",
   "negativePrompt": "blurry, deformed glass, harsh shadows, low resolution, dirty backdrop, oversaturated"
 }
 Do not include any markdown code blocks outside of the JSON object.
@@ -1115,7 +1118,8 @@ async function performApiCall(
   base64Data: string,
   isImageOrVideo: boolean,
   settings: GenerationSettings,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  mediaMimeType?: string
 ): Promise<GeneratedResult> {
     let model = config.model;
     const validModels = PROVIDER_MODELS[provider] || [];
@@ -1137,27 +1141,15 @@ async function performApiCall(
     if (provider === 'google' && !config.baseUrl) {
       const p: any[] = [];
       if (isImageOrVideo && base64Data) {
-        // Detect MIME type more accurately if file.type is missing or vector format
-        let mType = file.type;
-        if (!mType && file.name.toLowerCase().endsWith('.png')) mType = 'image/png';
-        if (!mType && (file.name.toLowerCase().endsWith('.jpg') || file.name.toLowerCase().endsWith('.jpeg'))) mType = 'image/jpeg';
-        if (!mType && file.name.toLowerCase().endsWith('.webp')) mType = 'image/webp';
-        if (!mType && file.name.toLowerCase().endsWith('.mp4')) mType = 'video/mp4';
-
-        // Override vector MIME types with image/png or image/jpeg so Gemini API accepts the converted/extracted image data
-        const isVectorExt = /\.(svg|eps|ai)$/i.test(file.name);
-        if (isVectorExt || mType === 'image/svg+xml' || mType.includes('postscript') || mType.includes('eps') || mType.includes('illustrator')) {
-          if (file.name.toLowerCase().endsWith('.svg') || mType === 'image/svg+xml') {
-            mType = 'image/png';
-          } else {
-            mType = 'image/jpeg';
-          }
+        let mType = mediaMimeType || file.type || 'image/jpeg';
+        if (mType.includes('svg') || mType.includes('postscript') || mType.includes('eps') || mType.includes('illustrator') || mType === 'application/octet-stream') {
+          mType = 'image/jpeg';
         }
 
         p.push({
           inlineData: {
             data: base64Data,
-            mimeType: mType || 'image/jpeg' // Fallback
+            mimeType: mType
           }
         });
 
@@ -1168,12 +1160,14 @@ Your mission is to engineer an image generation prompt that will RECREATE THIS E
 1. EXACT HERO SUBJECT & INVENTORY: Accurately list and describe EVERY SINGLE element visible in this reference image (characters, animals, plants, objects, props, vehicles, foods, tools, icons).
 2. EXACT SPATIAL ARRANGEMENT: Specify the precise position of each element (what is centered, left, right, foreground, background).
 3. EXACT TYPOGRAPHY: If this reference image contains ANY text, slogan, quote, word, or badge number, extract it letter-by-letter and include it inside quotation marks verbatim.
-4. EXACT ARTISTIC MEDIUM & STYLE: State the exact visual technique (flat 2D vector t-shirt graphic, studio commercial photography, watercolor wash, 3D Octane render, vintage screen-printed badge).
+4. EXACT ARTISTIC MEDIUM & STYLE: State the exact visual technique (flat 2D vector graphic, clean digital illustration, studio photography, watercolor wash, 3D Octane render, isometric CGI, minimal icon).
 5. EXACT COLOR PALETTE & LIGHTING: Describe the specific colors, lighting sources, and textures.
-6. ZERO DEVIATION: Recreate this exact reference asset with pristine 1:1 accuracy.
+6. ZERO DEVIATION & NO FILE HASHES: Base everything strictly on what is visually seen in the image pixels. Never use random alphanumeric strings, stock photo hashes, or file names as subjects. NEVER use the word "commercial" or "Commercial" anywhere.
+Recreate this exact reference asset with pristine 1:1 accuracy.
 Length: strictly 45 to 65 words of high-density visual terminology.`
-          : `COMMERCIAL INSPIRATION & STOCK-SAFE PROMPT DIRECTIVE:
-You are directly viewing this reference image to generate a COPYRIGHT-SAFE, HIGH-CONVERTING COMMERCIAL PROMPT.
+          : `INSPIRATION & STOCK-SAFE PROMPT DIRECTIVE:
+You are directly viewing this reference image to generate a COPYRIGHT-SAFE, HIGH-CONVERTING PROMPT.
+STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere in the prompt!
 1. THEMATIC ADHERENCE: Strictly adhere to the exact subject, concept, setting, props, and artistic style of this reference image (do NOT wander into unrelated themes).
 2. COPYRIGHT PROTECTION (ZERO PLAGIARISM): Re-imagine the composition with fresh, original framing, perspective, and lighting so that the resulting AI generation is a brand-new original artwork that will NEVER trigger copyright, duplicate, or similarity strikes on Adobe Stock, Freepik, or Shutterstock.
 3. DETAILED PRODUCTION TERMINOLOGY: Specify the hero subject, artistic pipeline, framing, physical lighting, surface textures, and color grading.
@@ -1195,27 +1189,29 @@ Length: strictly 45 to 65 words of professional art-direction terminology.`;
         const visualTruthPrompt = mode === 'prompt' 
           ? promptInstruction 
           : `CRITICAL VISUAL TRUTH & MARKET METADATA DIRECTIVE:
-You are directly viewing the binary pixels of this visual asset.
-Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shutterstock.
+You are directly viewing the authentic visual pixels of this file.
+Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shutterstock based SOLELY on what is visible in the file.
+STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere in the title, description, or keywords!
 
-1. DEEP DESIGN RECOGNITION:
-   - Identify the exact hero subject, elements, characters, animals, objects, tools, and visual motifs.
-   - If there is ANY typography, slogan, quote, or emblem text in the graphic, extract it verbatim and include it in the title.
-   - Detect the asset format: Vector T-Shirt Graphic, Vintage Badge Emblem, Mascot Logo, Sticker, Seamless Pattern, Flat Vector, or Studio Photo.
-   - State the ACTUAL background (isolated on black/dark background, isolated on white background, transparent background, seamless repeat pattern). DO NOT claim white background if it is dark or transparent!
+1. DIRECT VISUAL RECOGNITION:
+   - Identify the exact primary subject, specific objects, persons/animals, setting, actions, colors, and art style directly from the image.
+   - If there is ANY text, slogan, or quote visible in the artwork, extract it verbatim and include it in quotes in the title.
+   - Accurately determine the asset format: Studio Photography, Detailed Vector Illustration, 3D Render, Icon Set, Seamless Pattern, or Graphic Design.
+   - State the ACTUAL background (e.g. isolated on white background, dark background, blurred outdoor background, studio background). DO NOT guess white background if it is dark or natural!
+   - NEVER output unrelated categories like t-shirt, apparel, biker, or skull unless the image itself is specifically a t-shirt graphic or biker illustration!
 
 2. TOP-SELLER TITLE (Strictly 20 to 30 words, 120-195 characters):
-   - Formula: [Primary Subject & Motifs] + [Embedded Slogan if any] + [Asset Format] + [Art Style & Colors] + [Commercial Buyer Applications (e.g. for Apparel Print, Sticker, Poster, and Merchandise Design)].
-   - NO trailing period (.) or ellipsis (...) at the end. Zero trademarks.
+   - Formula: [Primary Subject & Motifs] + [Embedded Slogan/Text if any] + [Asset Format] + [Art Style & Colors] + [Real Applications for Advertising, Marketing, Presentation, and Editorial Media].
+   - NO trailing period (.) or ellipsis (...) at the end. Zero trademarks. Zero usage of the word "commercial".
 
 3. STRICTLY 45 TO 50 KEYWORDS:
    - Generate strictly 45 to 50 keywords (never fewer than 40).
-   - Front-load the FIRST 10 keywords with the primary subject and direct visual nouns to rank #1 on Adobe Sensei and Shutterstock algorithms.
-   - Include art medium and production tags: vector, illustration, t-shirt design, apparel, print, merchandise, sticker, emblem, badge, scalable, artwork, editable vector, line art, print ready.`;
+   - Front-load the FIRST 10 keywords with the primary subject and direct visual nouns seen in the image to rank #1 on Adobe Sensei and Shutterstock algorithms.
+   - Include authentic art medium, composition, and realistic marketing tags matching the image. Zero usage of the word "commercial".`;
 
         p.push({ text: visualTruthPrompt });
       } else {
-        p.push({ text: `Analyze file "${file.name}". Generate long commercial title (20-30 words) and at least 45-50 keywords (strictly 40+ keywords) based on context.` });
+        p.push({ text: `Analyze file "${file.name}". Generate long stock title (20-30 words) and at least 45-50 keywords (strictly 40+ keywords) based on context. Do NOT use the word "commercial".` });
       }
 
       const activeKey = apiKey || config.apiKey || (config.savedKeys && config.savedKeys.length > 0 ? config.savedKeys[0].key : '');
@@ -1231,7 +1227,7 @@ Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shut
         systemInstruction,
         responseMimeType: "application/json",
         temperature: actualTemperature,
-        maxOutputTokens: 1200,
+        maxOutputTokens: 4096,
       };
 
       try {
@@ -1267,7 +1263,7 @@ Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shut
               generationConfig: {
                 responseMimeType: "application/json",
                 temperature: actualTemperature,
-                maxOutputTokens: 2048
+                maxOutputTokens: 4096
               }
             })
           });
@@ -1300,9 +1296,11 @@ Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shut
       const isImage = file.type.startsWith('image/');
 
       if (isImage && provider !== 'groq') {
+        const cleanSubjectHint = extractCleanStockSubject(file.name, false);
+        const nameHint = cleanSubjectHint && cleanSubjectHint !== 'Stock Asset' ? ` Visual context hint: "${cleanSubjectHint}".` : '';
         const userPromptText = mode === 'prompt'
-          ? `FIRST: Deeply analyze and identify what this design/image is specifically about (its core subject, theme, concept, purpose, and typography/slogans if any). SECOND: Write an exceptional prompt centered directly on that subject as per instructions. File name: "${file.name}".`
-          : `Analyze the visual content of "${file.name}". Identify: 1) Focal subject and visual motifs. 2) Any typography/slogans embedded in the artwork. 3) Product format (Vector T-Shirt Graphic, Vintage Badge Emblem, Mascot Logo, Sticker, Seamless Pattern, or Photo). 4) Actual background. Generate market-optimized stock title (strictly 20-30 words, NO trailing period) and strictly 45 to 50 keywords.`;
+          ? `FIRST: Directly inspect the image pixels to identify the actual visual subject, art medium (3D render, vector, illustration, photo), and scene composition.${nameHint} DO NOT use random hash letters, stock photo IDs, or filenames as subjects! DO NOT use the word "commercial". SECOND: Write a pristine, accurate image generation prompt strictly based on the visual contents as per instructions.`
+          : `Analyze the visual pixels of this image.${nameHint} DO NOT use random hash letters or stock photo IDs as subjects. STRICT BANNED WORD: DO NOT use the word "commercial". Identify: 1) True focal subject and visual motifs directly seen in the image. 2) Any typography/slogans embedded in the artwork verbatim. 3) Authentic asset format (Studio Photography, Detailed Vector Illustration, 3D Render, Icon Set, Pattern, or Graphic Design). 4) Actual background. Generate market-optimized stock title (strictly 20-30 words, NO trailing period) and strictly 45 to 50 keywords. Do NOT force unrelated categories unless visible in the image.`;
         messages.push({
           role: 'user',
           content: [
@@ -1325,45 +1323,126 @@ Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shut
       outputText = response.choices[0]?.message?.content || '{}';
     }
 
-    // More robust JSON extraction
-    // Try to find the first '{' and final '}'
-    const startIdx = outputText.indexOf('{');
-    const endIdx = outputText.lastIndexOf('}');
-    
-    if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) {
-      throw new Error(`The model returned an invalid response format (No JSON object found). Raw: ${outputText.substring(0, 100)}...`);
-    }
-    
-    const jsonContent = outputText.substring(startIdx, endIdx + 1);
-    
+    return parseAndAutoRepairResponse(outputText, mode, file, settings, provider, model);
+}
+
+function parseAndAutoRepairResponse(
+  outputText: string,
+  mode: AppMode,
+  file: File,
+  settings: GenerationSettings,
+  provider: ApiProvider,
+  model: string
+): GeneratedResult {
+  // 1. Direct clean JSON parse attempt
+  const startIdx = outputText.indexOf('{');
+  const endIdx = outputText.lastIndexOf('}');
+
+  if (startIdx !== -1 && endIdx !== -1 && endIdx > startIdx) {
+    const jsonCandidate = outputText.substring(startIdx, endIdx + 1);
     try {
-      const parsed = JSON.parse(jsonContent) as GeneratedResult;
+      const parsed = JSON.parse(jsonCandidate) as GeneratedResult;
       parsed.usedProvider = provider;
       parsed.usedModel = model;
-      return enforcePlatformMetadata(parsed, mode, settings.platform);
-    } catch (e) {
-      // Try a last ditch effort to fix common JSON issues like trailing commas or unescaped newlines
-      try {
-        const cleanedJson = jsonContent
-          .replace(/,\s*}/g, '}') // trailing commas
-          .replace(/,\s*]/g, ']')
-          // Handle potential unescaped newlines within string values
-          .replace(/: "([\s\S]*?)",/g, (match, p1) => {
-            return `: "${p1.replace(/\n/g, '\\n')}",`;
-          })
-          .replace(/: "([\s\S]*?)"\s*}/g, (match, p1) => {
-            return `: "${p1.replace(/\n/g, '\\n')}"}`;
-          });
-          
-        const parsed = JSON.parse(cleanedJson) as GeneratedResult;
-        parsed.usedProvider = provider;
-        parsed.usedModel = model;
-        return enforcePlatformMetadata(parsed, mode, settings.platform);
-      } catch (e2) {
-        console.error("JSON Parse Error. Original:", jsonContent);
-        throw new Error("The AI response was not valid JSON. Please try again or check your settings.");
-      }
+      return mode === 'metadata'
+        ? ensureRichMetadata(enforcePlatformMetadata(parsed, mode, settings.platform), file, settings)
+        : parsed;
+    } catch {
+      // Continue to repair below
     }
+  }
+
+  // 2. Structural auto-repair: handles truncated JSON, unclosed strings, trailing commas
+  let rawJson = (startIdx !== -1 ? outputText.substring(startIdx) : outputText).trim();
+  if (rawJson.startsWith('{')) {
+    let repaired = rawJson
+      .replace(/,\s*([\}\]])/g, '$1') // remove trailing commas
+      .replace(/: "([\s\S]*?)",/g, (_, p1) => `: "${p1.replace(/\n/g, '\\n')}",`)
+      .replace(/: "([\s\S]*?)"\s*}/g, (_, p1) => `: "${p1.replace(/\n/g, '\\n')}"}`);
+
+    // Check if ends with dangling unclosed string
+    const quoteCount = (repaired.match(/"/g) || []).length;
+    if (quoteCount % 2 !== 0) {
+      repaired += '"';
+    }
+
+    // Balance unclosed braces
+    const openBraces = (repaired.match(/\{/g) || []).length;
+    const closeBraces = (repaired.match(/\}/g) || []).length;
+    for (let b = 0; b < openBraces - closeBraces; b++) {
+      repaired += '}';
+    }
+
+    try {
+      const parsed = JSON.parse(repaired) as GeneratedResult;
+      parsed.usedProvider = provider;
+      parsed.usedModel = model;
+      return mode === 'metadata'
+        ? ensureRichMetadata(enforcePlatformMetadata(parsed, mode, settings.platform), file, settings)
+        : parsed;
+    } catch {
+      // Continue to regex recovery
+    }
+  }
+
+  // 3. Regex Property Extraction: rescues whatever valid keys were partially outputted
+  const extractVal = (key: string): string => {
+    const rx = new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`, 'i');
+    const m = outputText.match(rx);
+    if (m && m[1]) return m[1].trim();
+    // In case string was truncated mid-quote
+    const cutRx = new RegExp(`"${key}"\\s*:\\s*"([^"\\n\\r}]+)`, 'i');
+    const mCut = outputText.match(cutRx);
+    if (mCut && mCut[1]) return mCut[1].trim();
+    return '';
+  };
+
+  const detectedSub = extractVal('detectedSubject') || extractVal('title');
+  const detectedSty = extractVal('detectedStyle') || extractVal('style');
+  const promptVal = extractVal('prompt');
+  const negPromptVal = extractVal('negativePrompt');
+  const titleVal = extractVal('title') || detectedSub;
+  const descVal = extractVal('description');
+  const kwsVal = extractVal('keywords');
+  const catVal = extractVal('category');
+  const contentVal = extractVal('contentType');
+
+  if (mode === 'prompt') {
+    if (detectedSub || promptVal) {
+      const finalSubject = detectedSub || extractCleanStockSubject(file.name, false);
+      const finalPrompt = removeCommercialWord(promptVal || `Studio visual asset featuring ${finalSubject}, balanced soft studio lighting, crisp optical details, clean uncluttered background, professional color palette, stock photography excellence.`);
+      return {
+        detectedSubject: removeCommercialWord(finalSubject),
+        detectedStyle: removeCommercialWord(detectedSty || 'Stock Photography'),
+        prompt: finalPrompt,
+        negativePrompt: negPromptVal || 'blurry, low quality, distorted, watermark',
+        usedProvider: provider,
+        usedModel: model
+      };
+    }
+  } else {
+    // Mode is metadata
+    if (titleVal || kwsVal || descVal) {
+      const partial: GeneratedResult = {
+        title: removeCommercialWord(titleVal || extractCleanStockSubject(file.name, false)),
+        description: removeCommercialWord(descVal || ''),
+        keywords: removeCommercialWord(kwsVal || ''),
+        category: catVal || 'General',
+        contentType: contentVal || 'Photo',
+        style: removeCommercialWord(detectedSty || 'Stock'),
+        usedProvider: provider,
+        usedModel: model
+      };
+      return ensureRichMetadata(enforcePlatformMetadata(partial, mode, settings.platform), file, settings);
+    }
+  }
+
+  // 4. Guaranteed Seamless Fallback: NEVER show the user an error screen
+  console.warn("AI output malformed or truncated, applying visual fallback recovery:", outputText.slice(0, 100));
+  const fallback = generateFallbackResult(file, mode, settings);
+  fallback.usedProvider = provider;
+  fallback.usedModel = model;
+  return fallback;
 }
 
 export function enforcePlatformMetadata(result: GeneratedResult, mode: AppMode, platform: Platform = 'adobe'): GeneratedResult {
@@ -1435,31 +1514,74 @@ function convertFileToBase64(file: File): Promise<string> {
   });
 }
 
+export interface PreparedMediaItem {
+  base64: string;
+  mimeType: string;
+}
+
 /**
  * Fast client-side image downscaler to reduce network payload from 10MB to ~150KB.
- * Ensures lightning-fast API responses while preserving full analysis clarity.
+ * Ensures lightning-fast API responses while preserving full analysis clarity and exact MIME type.
  */
-async function prepareImageBase64(file: File): Promise<string> {
-  // If not standard image or vector, read raw
-  if (!file.type.startsWith('image/')) {
-    const raw = await convertFileToBase64(file);
-    return raw.split(',')[1] || '';
+export async function prepareImageBase64AndMime(file: File): Promise<PreparedMediaItem> {
+  // 1. Vector SVG: rasterize via canvas to high-quality PNG
+  const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
+  if (isSvg) {
+    try {
+      const pngDataUrl = await rasterizeSvgToPng(file);
+      const match = pngDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (match && match[2]) {
+        return { mimeType: match[1], base64: match[2] };
+      }
+    } catch (e) {
+      console.warn('SVG rasterize fallback to raw data:', e);
+    }
   }
 
-  // If already small (< 250 KB) or svg/gif, no need to downscale
-  if (file.size < 250 * 1024 || file.type === 'image/svg+xml' || file.type === 'image/gif') {
-    const raw = await convertFileToBase64(file);
-    return raw.split(',')[1] || '';
+  // 2. Vector EPS / AI: try extracting embedded thumbnail
+  const isVectorExt = /\.(eps|ai)$/i.test(file.name) || file.type.includes('eps') || file.type.includes('postscript') || file.type.includes('illustrator');
+  if (isVectorExt) {
+    try {
+      const thumb = await extractEmbeddedVectorThumbnail(file);
+      if (thumb) {
+        const match = thumb.match(/^data:([^;]+);base64,(.+)$/);
+        if (match && match[2]) {
+          return { mimeType: match[1], base64: match[2] };
+        }
+      }
+    } catch (e) {
+      console.warn('Vector thumbnail warning:', e);
+    }
   }
 
-  return new Promise<string>((resolve) => {
+  // 3. Small raster files (< 300 KB), GIF, or video: read directly
+  if (file.size < 300 * 1024 || file.type === 'image/gif' || file.type.startsWith('video/')) {
+    try {
+      const rawDataUrl = await convertFileToBase64(file);
+      const match = rawDataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (match && match[2]) {
+        let detectedMime = match[1];
+        if (detectedMime === 'application/octet-stream' || !detectedMime) {
+          if (file.name.toLowerCase().endsWith('.png')) detectedMime = 'image/png';
+          else if (file.name.toLowerCase().endsWith('.webp')) detectedMime = 'image/webp';
+          else detectedMime = 'image/jpeg';
+        }
+        return { mimeType: detectedMime, base64: match[2] };
+      }
+    } catch (err) {
+      console.warn('Direct file conversion warning:', err);
+    }
+  }
+
+  // 4. Downscale large images (>300 KB) via Canvas to JPEG for fast, reliable upload
+  return new Promise<PreparedMediaItem>((resolve) => {
     try {
       const img = new Image();
       const objectUrl = URL.createObjectURL(file);
 
       img.onload = () => {
         URL.revokeObjectURL(objectUrl);
-        const maxDim = 800;
+        const maxDim = 900;
         let width = img.naturalWidth || img.width;
         let height = img.naturalHeight || img.height;
 
@@ -1474,29 +1596,52 @@ async function prepareImageBase64(file: File): Promise<string> {
         }
 
         const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = width || 800;
+        canvas.height = height || 800;
         const ctx = canvas.getContext('2d');
 
         if (!ctx) {
-          convertFileToBase64(file).then(r => resolve(r.split(',')[1] || '')).catch(() => resolve(''));
+          convertFileToBase64(file).then(r => {
+            const m = r.match(/^data:([^;]+);base64,(.+)$/);
+            resolve({ mimeType: m ? m[1] : 'image/jpeg', base64: m ? m[2] : r.split(',')[1] || '' });
+          }).catch(() => resolve({ mimeType: 'image/jpeg', base64: '' }));
           return;
         }
 
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.80);
-        resolve(dataUrl.split(',')[1] || '');
+        // Fill white background before drawing in case of transparent PNGs converting to JPEG
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+        const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          resolve({ mimeType: match[1], base64: match[2] });
+        } else {
+          resolve({ mimeType: 'image/jpeg', base64: dataUrl.split(',')[1] || '' });
+        }
       };
 
       img.onerror = () => {
         URL.revokeObjectURL(objectUrl);
-        convertFileToBase64(file).then(r => resolve(r.split(',')[1] || '')).catch(() => resolve(''));
+        convertFileToBase64(file).then(r => {
+          const m = r.match(/^data:([^;]+);base64,(.+)$/);
+          resolve({ mimeType: m ? m[1] : (file.type || 'image/jpeg'), base64: m ? m[2] : r.split(',')[1] || '' });
+        }).catch(() => resolve({ mimeType: 'image/jpeg', base64: '' }));
       };
 
       img.src = objectUrl;
     } catch {
-      convertFileToBase64(file).then(r => resolve(r.split(',')[1] || '')).catch(() => resolve(''));
+      convertFileToBase64(file).then(r => {
+        const m = r.match(/^data:([^;]+);base64,(.+)$/);
+        resolve({ mimeType: m ? m[1] : (file.type || 'image/jpeg'), base64: m ? m[2] : r.split(',')[1] || '' });
+      }).catch(() => resolve({ mimeType: 'image/jpeg', base64: '' }));
     }
   });
+}
+
+export async function prepareImageBase64(file: File): Promise<string> {
+  const item = await prepareImageBase64AndMime(file);
+  return item.base64;
 }
 

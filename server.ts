@@ -4,11 +4,11 @@ import { GoogleGenAI } from "@google/genai";
 
 // Concurrency throttler to keep concurrent outbound calls under API rate limits
 class GeminiThrottleQueue {
-  private maxConcurrent = 3;
+  private maxConcurrent = 2;
   private currentRunning = 0;
   private queue: (() => void)[] = [];
   private lastCallTime = 0;
-  private minIntervalMs = 250;
+  private minIntervalMs = 400;
 
   async acquire(): Promise<() => void> {
     if (this.currentRunning >= this.maxConcurrent) {
@@ -81,9 +81,9 @@ async function startServer() {
         genConfig.temperature = config.temperature;
       }
       if (typeof config?.maxOutputTokens === "number") {
-        genConfig.maxOutputTokens = Math.min(config.maxOutputTokens, 1200);
+        genConfig.maxOutputTokens = Math.max(4096, Math.min(config.maxOutputTokens, 8192));
       } else {
-        genConfig.maxOutputTokens = 1200;
+        genConfig.maxOutputTokens = 8192;
       }
 
       // Fast model call prioritizing ultra-fast gemini-2.5-flash, gemini-3.8-flash, and flash-latest
@@ -136,11 +136,11 @@ async function startServer() {
               
               if (is429) {
                 // Rate limit 429: wait with exponential backoff before retry to allow quota window to replenish
-                const waitTime = (attempt + 1) * 1200 + Math.floor(Math.random() * 400);
+                const waitTime = (attempt + 1) * 2000 + Math.floor(Math.random() * 500);
                 console.warn(`[Gemini 429 Backoff] Waiting ${waitTime}ms for quota reset...`);
                 await new Promise(r => setTimeout(r, waitTime));
               } else if (attempt === 0 && is503) {
-                await new Promise(r => setTimeout(r, 400)); // Brief pause before retry on 503
+                await new Promise(r => setTimeout(r, 600)); // Brief pause before retry on 503
               }
             }
           }
@@ -248,12 +248,10 @@ async function startServer() {
 
       const backupPool = [
         "vector", "illustration", "graphic design", "commercial use", "isolated", "artwork",
-        "t-shirt design", "print ready", "merchandise", "sticker", "scalable", "digital art",
-        "creative asset", "branding", "visual element", "template", "apparel", "emblem",
-        "badge", "eps", "high resolution", "screen printing", "editorial", "contemporary",
-        "decorative", "detail", "symbol", "icon", "line art", "sublimation", "poster",
-        "banner", "advertising", "marketing", "presentation", "social media", "creative design",
-        "concept", "silhouette", "monochrome", "clean background", "print design", "clip art"
+        "digital art", "creative asset", "branding", "visual element", "template", "emblem",
+        "badge", "eps", "contemporary", "decorative", "detail", "symbol", "icon", "line art",
+        "poster", "banner", "advertising", "marketing", "presentation", "creative design",
+        "concept", "silhouette", "monochrome", "clean background", "clip art", "modern", "style"
       ];
 
       for (const tag of backupPool) {

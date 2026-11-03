@@ -75,7 +75,7 @@ function getCategoryBadge(cat: string) {
 }
 
 function generatePromptForEvent(event: StockEvent): string {
-  return `High quality, commercially viable photorealistic stock photo representing ${event.title}, concept: ${event.idea}. Professional studio lighting, rich depth of field, vivid detail, authentic candid moment, 8k resolution, copy space for text, commercial microstock ready.`;
+  return `High quality studio stock photo representing ${event.title}, concept: ${event.idea}. Professional studio lighting, rich depth of field, vivid detail, authentic candid moment, crisp optical resolution, copy space for text, stock marketplace ready.`;
 }
 
 interface EventCalendarProps {

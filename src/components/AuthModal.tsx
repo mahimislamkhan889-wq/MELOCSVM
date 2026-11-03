@@ -19,6 +19,7 @@ import {
 import { 
   GoogleAuthProvider, 
   signInWithPopup, 
+  signInWithRedirect,
   signInWithPhoneNumber, 
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
@@ -74,6 +75,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
 
   // General State
   const [isLoading, setIsLoading] = useState(false);
+  const [isPopupBlocked, setIsPopupBlocked] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -137,7 +139,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
     }, 800);
   };
 
-  // 1. Handle Google Sign-In
+  // 1. Handle Google Sign-In (Popup Mode)
   const handleGoogleSignIn = async () => {
     setIsLoading(true);
     setErrorMessage(null);
@@ -154,12 +156,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
       if (err.code === 'auth/popup-closed-by-user') {
         setErrorMessage('Sign-in popup was closed. Please try again.');
       } else if (err.code === 'auth/popup-blocked') {
-        setErrorMessage('Browser popup blocked. Please allow popups or use Email sign-in.');
+        setIsPopupBlocked(true);
+        setErrorMessage('Browser popup blocked. Please click "Continue with Redirect Mode" below or allow popups in your browser.');
       } else if (err.code === 'auth/unauthorized-domain') {
-        setErrorMessage('Domain authorization required. You can use Email login or Instant Access.');
+        const domain = typeof window !== 'undefined' ? window.location.hostname : 'your domain';
+        setErrorMessage(`Domain "${domain}" is not authorized in Firebase. Add "${domain}" in Firebase Console > Authentication > Settings > Authorized Domains, or use Email / Instant Access.`);
       } else {
         setErrorMessage(err.message || 'Failed to sign in with Google.');
       }
+      setIsLoading(false);
+    }
+  };
+
+  // 1b. Handle Google Sign-In (Redirect Mode - 100% bypasses popup blockers)
+  const handleGoogleRedirectSignIn = async () => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: 'select_account' });
+      await signInWithRedirect(auth, provider);
+    } catch (err: any) {
+      console.error('Google Redirect Sign-In Error:', err);
+      setErrorMessage(err.message || 'Failed to start redirect sign-in. Please use Email or Instant Access.');
       setIsLoading(false);
     }
   };
@@ -468,6 +488,30 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
         {/* Tab 1: Google Sign-In */}
         {method === 'google' && (
           <div className="space-y-4">
+            {/* Dedicated Popup Blocked Help & 1-Click Redirect Button */}
+            {isPopupBlocked && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-2.5 animate-in fade-in duration-150">
+                <div className="flex items-start gap-2 text-amber-900 dark:text-amber-200">
+                  <AlertCircle size={16} className="text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="font-bold text-[12px] text-zinc-900 dark:text-zinc-100">Popup Blocked by Browser</p>
+                    <p className="text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-300">
+                      Your browser's built-in popup blocker blocked the Google sign-in window. Click below to sign in using <strong>Redirect Mode</strong> (opens in this window, never blocked by browser):
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleGoogleRedirectSignIn}
+                  disabled={isLoading}
+                  className="w-full py-2.5 px-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <ArrowRight size={14} />
+                  <span>Continue with Google (Redirect Mode — No Popup)</span>
+                </button>
+              </div>
+            )}
+
             <button
               type="button"
               onClick={handleGoogleSignIn}
@@ -495,6 +539,20 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose, onSuccess
               </svg>
               <span>{isLoading ? 'Connecting with Google...' : 'Continue with Gmail / Google'}</span>
             </button>
+
+            {!isPopupBlocked && (
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={handleGoogleRedirectSignIn}
+                  disabled={isLoading}
+                  className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer inline-flex items-center gap-1"
+                >
+                  <span>Having popup issues? Use Redirect Mode (No Popup)</span>
+                  <ArrowRight size={11} />
+                </button>
+              </div>
+            )}
 
             <div className="pt-2 flex items-center justify-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400 text-center">
               <ShieldCheck size={13} className="text-emerald-500" />
