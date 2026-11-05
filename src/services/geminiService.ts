@@ -104,50 +104,28 @@ export async function testApiConnection(provider: ApiProvider, config: ApiConfig
 
     if (provider === 'google' && !config.baseUrl) {
       const activeKey = config.apiKey || (config.savedKeys && config.savedKeys.length > 0 ? config.savedKeys[0].key : '');
-      const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '') || "";
-      const actualApiKey = activeKey || envKey;
 
       let testModel = model || 'gemini-3.8-flash';
       if (!testModel || testModel.includes('2.0-flash') || testModel === 'gemini-2.5-flash') {
         testModel = 'gemini-3.8-flash';
       }
 
-      // Always test through full-stack /api/generate proxy to prevent client-side CORS issues
-      try {
-        const testRes = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: testModel,
-            contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
-            customApiKey: actualApiKey || undefined
-          })
-        });
-        if (testRes.ok) {
-          const data = await testRes.json();
-          return !!data.text;
-        } else {
-          const errData = await testRes.json().catch(() => ({}));
-          throw new Error(errData.error || 'Server connection failed.');
-        }
-      } catch (proxyError: any) {
-        if (actualApiKey) {
-          const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${testModel}:generateContent?key=${actualApiKey}`;
-          const response = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: [{ text: 'Hi' }] }]
-            })
-          });
-          if (response.ok) {
-            const data = await response.json();
-            return !!data.candidates?.[0]?.content?.parts?.[0]?.text;
-          }
-          const errData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-          throw new Error(errData.error?.message || errData.error || proxyError.message);
-        }
-        throw proxyError;
+      // Always test through full-stack /api/generate proxy
+      const testRes = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: testModel,
+          contents: [{ role: 'user', parts: [{ text: 'Hi' }] }],
+          customApiKey: activeKey || undefined
+        })
+      });
+      if (testRes.ok) {
+        const data = await testRes.json();
+        return !!data.text;
+      } else {
+        const errData = await testRes.json().catch(() => ({}));
+        throw new Error(errData.error || 'Server connection failed.');
       }
     } else {
       const openai = new OpenAI({
@@ -1229,8 +1207,6 @@ STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere
       }
 
       const activeKey = apiKey || config.apiKey || (config.savedKeys && config.savedKeys.length > 0 ? config.savedKeys[0].key : '');
-      const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '') || "";
-      const actualApiKey = activeKey || envKey;
 
       let effectiveModel = model || 'gemini-3.8-flash';
       if (!effectiveModel || effectiveModel.includes('2.0-flash') || effectiveModel === 'gemini-2.5-flash') {
@@ -1243,67 +1219,35 @@ STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere
         maxOutputTokens: 4096,
       };
 
-      try {
-        const netRes = await fetch('/api/generate', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          signal,
-          body: JSON.stringify({
-            model: effectiveModel,
-            contents: [{ role: 'user', parts: p }],
-            config: genConfigPayload,
-            customApiKey: actualApiKey || undefined
-          })
-        });
+      const netRes = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal,
+        body: JSON.stringify({
+          model: effectiveModel,
+          contents: [{ role: 'user', parts: p }],
+          config: genConfigPayload,
+          customApiKey: activeKey || undefined
+        })
+      });
 
-        if (netRes.ok) {
-          const netData = await netRes.json();
-          outputText = netData.text || '{}';
-        } else {
-          let errMessage = '';
-          try {
-            const errJson = await netRes.json();
-            errMessage = errJson?.error || errJson?.message;
-          } catch {
-            const text = await netRes.text().catch(() => '');
-            if (text && text.length < 300) errMessage = text;
-          }
-          let finalErr = errMessage || `Server generation error: ${netRes.status}`;
-          if (netRes.status === 400 && (!errMessage || errMessage.includes('400'))) {
-            finalErr = "Gemini API Key is missing or invalid on Netlify (400). Please click 'Configure API Key' to set your key.";
-          }
-          throw new Error(finalErr);
+      if (netRes.ok) {
+        const netData = await netRes.json();
+        outputText = netData.text || '{}';
+      } else {
+        let errMessage = '';
+        try {
+          const errJson = await netRes.json();
+          errMessage = errJson?.error || errJson?.message;
+        } catch {
+          const text = await netRes.text().catch(() => '');
+          if (text && text.length < 300) errMessage = text;
         }
-      } catch (proxyError: any) {
-        if (actualApiKey && !proxyError.message?.includes('AbortError')) {
-          const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${effectiveModel}:generateContent?key=${actualApiKey}`;
-          const response = await fetch(fallbackUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal,
-            body: JSON.stringify({
-              contents: [{ role: 'user', parts: p }],
-              systemInstruction: { parts: [{ text: systemInstruction }] },
-              generationConfig: {
-                responseMimeType: "application/json",
-                temperature: actualTemperature,
-                maxOutputTokens: 4096
-              }
-            })
-          });
-
-          if (response.ok) {
-            const data = await response.json();
-            const parts = data.candidates?.[0]?.content?.parts || [];
-            const textPart = parts.find((partItem: any) => partItem.text && !partItem.thought) || parts[0];
-            outputText = textPart?.text || '{}';
-          } else {
-            const errData = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
-            throw new Error(errData.error?.message || errData.error || proxyError.message);
-          }
-        } else {
-          throw proxyError;
+        let finalErr = errMessage || `Server generation error: ${netRes.status}`;
+        if (netRes.status === 400 && (!errMessage || errMessage.includes('400'))) {
+          finalErr = "Gemini API Key is missing or invalid on the server (400). Please check your API key configuration in settings.";
         }
+        throw new Error(finalErr);
       }
     } else {
       const openai = new OpenAI({
