@@ -18,6 +18,7 @@ import { AuthModal } from './components/AuthModal';
 import { CreditModal } from './components/CreditModal';
 import { AdminUsersModal } from './components/AdminUsersModal';
 import { ProfileAvatarModal } from './components/ProfileAvatarModal';
+import { ApiConfigModal } from './components/ApiConfigModal';
 import { TrackerSection } from './components/TrackerSection';
 import { resolveUserAvatar, getFallbackAvatarUrl } from './lib/avatarHelper';
 import { syncUserOnLogin } from './services/userSyncService';
@@ -592,9 +593,10 @@ export default function App() {
     const toProcess = files.filter(f => f.status === 'pending' || f.status === 'error');
     if (toProcess.length === 0) return;
 
-    // Check if user has enough credits
+    // Check if user has enough credits (Admin and Unlimited Plan are completely bypass / unlimited)
+    const isUnlimited = isAdmin || userCredits.plan === 'unlimited' || userCredits.credits >= 99999;
     const requiredCredits = toProcess.length * COST_PER_FILE;
-    if (userCredits.credits < requiredCredits) {
+    if (!isUnlimited && userCredits.credits < requiredCredits) {
       setInsufficientFilesCount(toProcess.length);
       setIsCreditModalOpen(true);
       return;
@@ -608,7 +610,8 @@ export default function App() {
       setIsAuthModalOpen(true);
       return;
     }
-    if (userCredits.credits < COST_PER_FILE) {
+    const isUnlimited = isAdmin || userCredits.plan === 'unlimited' || userCredits.credits >= 99999;
+    if (!isUnlimited && userCredits.credits < COST_PER_FILE) {
       setInsufficientFilesCount(1);
       setIsCreditModalOpen(true);
       return;
@@ -1795,7 +1798,11 @@ export default function App() {
                                         <div className="inline-flex p-3 rounded-full bg-red-500/10 text-red-500 dark:text-red-400 border border-red-500/20 mb-1">
                                           <AlertCircle size={24} />
                                         </div>
-                                        <p className="text-sm text-red-600 dark:text-red-300 font-medium max-w-md mx-auto">{file.error}</p>
+                                        <p className="text-sm text-red-600 dark:text-red-300 font-medium max-w-md mx-auto">
+                                          {file.error?.includes('400')
+                                            ? "Netlify API Key missing or invalid (400). Click 'Configure API Key' below to enter your Gemini API Key."
+                                            : file.error}
+                                        </p>
                                         <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
                                           <button 
                                             onClick={() => setShowApiSettings(true)}
@@ -2230,6 +2237,14 @@ export default function App() {
           currentAdminEmail={currentUser?.email || currentUser?.phoneNumber || 'Admin'}
         />
       )}
+
+      {/* API Configuration Modal */}
+      <ApiConfigModal
+        isOpen={showApiSettings}
+        onClose={() => setShowApiSettings(false)}
+        settings={settings}
+        setSettings={setSettings}
+      />
     </div>
   );
 }

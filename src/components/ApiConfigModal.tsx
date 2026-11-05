@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, ExternalLink, ShieldCheck, Sparkles, Globe, Moon, Bot, Zap, Plus, Key, Cpu, Sparkle, Link, CheckCircle2, AlertCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { ApiProvider, GenerationSettings, testApiConnection } from '../services/geminiService';
+import { saveStoredApifyToken } from '../services/apifyService';
 import { cn } from '../lib/utils';
 
 import { PROVIDER_MODELS } from '../lib/models';
@@ -15,6 +16,7 @@ interface ApiConfigModalProps {
 
 const PROVIDER_INFO = [
   { id: 'google', name: 'Google Gemini', icon: Sparkles, url: 'https://aistudio.google.com/app/apikey', subtitle: 'Powerful multimodal AI by Google', badge: 'FREE & PAID', models: PROVIDER_MODELS.google },
+  { id: 'apify', name: 'Apify Stock Scraper', icon: Bot, url: 'https://console.apify.com/account/integrations', subtitle: 'Competitor microstock scraper & tag enrichment', badge: 'STOCK ACTOR', models: PROVIDER_MODELS.apify || [] },
   { id: 'openrouter', name: 'OpenRouter', icon: Globe, url: 'https://openrouter.ai/keys', subtitle: 'Unified API for all LLMs', badge: 'PAID', models: PROVIDER_MODELS.openrouter },
   { id: 'openai', name: 'OpenAI', icon: Moon, url: 'https://platform.openai.com/api-keys', subtitle: 'Industry standard models', badge: 'PAID', models: PROVIDER_MODELS.openai },
   { id: 'mistral', name: 'Mistral AI', icon: Bot, url: 'https://console.mistral.ai/api-keys/', subtitle: 'Open-weight models', badge: 'PAID', models: PROVIDER_MODELS.mistral },
@@ -101,6 +103,10 @@ export function ApiConfigModal({ isOpen, onClose, settings, setSettings }: ApiCo
         }
       };
     });
+
+    if (info.id === 'apify' && keys[0]) {
+      saveStoredApifyToken(keys[0]);
+    }
   };
 
   const handleDeleteKey = (id: string, e: React.MouseEvent) => {

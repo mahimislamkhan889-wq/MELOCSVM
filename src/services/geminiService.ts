@@ -6,7 +6,9 @@ import {
   isApifyAutoScrapeEnabled, 
   enrichWithApifyKeywords, 
   generateMetadataFromApify,
-  generatePromptFromApify
+  generatePromptFromApify,
+  validateApifyToken,
+  saveStoredApifyToken
 } from './apifyService';
 
 // No module-level initialization to avoid browser errors
@@ -89,14 +91,25 @@ export async function testApiConnection(provider: ApiProvider, config: ApiConfig
   }
 
   try {
+    if (provider === 'apify') {
+      const token = config.apiKey?.trim();
+      if (!token) throw new Error('Apify API Token is required');
+      const valRes = await validateApifyToken(token);
+      if (!valRes.success) {
+        throw new Error(valRes.error || 'Apify Token authentication failed');
+      }
+      saveStoredApifyToken(token);
+      return true;
+    }
+
     if (provider === 'google' && !config.baseUrl) {
       const activeKey = config.apiKey || (config.savedKeys && config.savedKeys.length > 0 ? config.savedKeys[0].key : '');
       const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '') || "";
       const actualApiKey = activeKey || envKey;
 
-      let testModel = model || 'gemini-2.5-flash';
-      if (!testModel || testModel.includes('2.0-flash')) {
-        testModel = 'gemini-2.5-flash';
+      let testModel = model || 'gemini-3.8-flash';
+      if (!testModel || testModel.includes('2.0-flash') || testModel === 'gemini-2.5-flash') {
+        testModel = 'gemini-3.8-flash';
       }
 
       // Always test through full-stack /api/generate proxy to prevent client-side CORS issues
@@ -1218,15 +1231,14 @@ STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere
       const envKey = (typeof import.meta !== 'undefined' && import.meta.env?.VITE_GEMINI_API_KEY) || (typeof process !== 'undefined' ? process.env?.GEMINI_API_KEY : '') || "";
       const actualApiKey = activeKey || envKey;
 
-      let effectiveModel = model || 'gemini-2.5-flash';
-      if (!effectiveModel || effectiveModel.includes('2.0-flash')) {
-        effectiveModel = 'gemini-2.5-flash';
+      let effectiveModel = model || 'gemini-3.8-flash';
+      if (!effectiveModel || effectiveModel.includes('2.0-flash') || effectiveModel === 'gemini-2.5-flash') {
+        effectiveModel = 'gemini-3.8-flash';
       }
 
       const genConfigPayload: Record<string, any> = {
         systemInstruction,
         responseMimeType: "application/json",
-        temperature: actualTemperature,
         maxOutputTokens: 4096,
       };
 
@@ -1247,8 +1259,19 @@ STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere
           const netData = await netRes.json();
           outputText = netData.text || '{}';
         } else {
-          const errData = await netRes.json().catch(() => ({}));
-          throw new Error(errData.error || `Server generation error: ${netRes.status}`);
+          let errMessage = '';
+          try {
+            const errJson = await netRes.json();
+            errMessage = errJson?.error || errJson?.message;
+          } catch {
+            const text = await netRes.text().catch(() => '');
+            if (text && text.length < 300) errMessage = text;
+          }
+          let finalErr = errMessage || `Server generation error: ${netRes.status}`;
+          if (netRes.status === 400 && (!errMessage || errMessage.includes('400'))) {
+            finalErr = "Gemini API Key is missing or invalid on Netlify (400). Please click 'Configure API Key' to set your key.";
+          }
+          throw new Error(finalErr);
         }
       } catch (proxyError: any) {
         if (actualApiKey && !proxyError.message?.includes('AbortError')) {
@@ -1520,11 +1543,123 @@ export interface PreparedMediaItem {
 }
 
 /**
+ * Fast client-side video frame extractor.
+ * Captures a representative high-resolution keyframe from video (MP4, MOV, WEBM, etc.)
+ * onto canvas as an optimized JPEG (~150KB).
+ * Eliminates serverless payload limits (Netlify 6MB limit) and works with all vision models.
+ */
+export async function extractVideoFrame(file: File): Promise<PreparedMediaItem> {
+  return new Promise((resolve, reject) => {
+    try {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      video.muted = true;
+      video.playsInline = true;
+      video.crossOrigin = 'anonymous';
+      const objectUrl = URL.createObjectURL(file);
+
+      let isHandled = false;
+      const timeoutId = setTimeout(() => {
+        if (!isHandled) {
+          isHandled = true;
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('Video frame extraction timed out'));
+        }
+      }, 7000);
+
+      video.onloadedmetadata = () => {
+        // Seek to 1.0 second or 15% to skip initial black frames
+        const duration = video.duration || 0;
+        const targetTime = duration > 2 ? 1.0 : (duration > 0.5 ? duration * 0.2 : 0);
+        video.currentTime = targetTime;
+      };
+
+      video.onseeked = () => {
+        if (isHandled) return;
+        isHandled = true;
+        clearTimeout(timeoutId);
+        try {
+          const maxDim = 900;
+          let width = video.videoWidth || 800;
+          let height = video.videoHeight || 600;
+
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(video, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            URL.revokeObjectURL(objectUrl);
+            const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+            if (match && match[2]) {
+              resolve({ mimeType: 'image/jpeg', base64: match[2] });
+              return;
+            }
+          }
+          URL.revokeObjectURL(objectUrl);
+          reject(new Error('Could not render video frame to canvas'));
+        } catch (err) {
+          URL.revokeObjectURL(objectUrl);
+          reject(err);
+        }
+      };
+
+      video.onerror = () => {
+        if (isHandled) return;
+        isHandled = true;
+        clearTimeout(timeoutId);
+        URL.revokeObjectURL(objectUrl);
+        reject(new Error('Browser could not decode video for frame extraction'));
+      };
+
+      video.src = objectUrl;
+      video.load();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+/**
  * Fast client-side image downscaler to reduce network payload from 10MB to ~150KB.
  * Ensures lightning-fast API responses while preserving full analysis clarity and exact MIME type.
  */
 export async function prepareImageBase64AndMime(file: File): Promise<PreparedMediaItem> {
-  // 1. Vector SVG: rasterize via canvas to high-quality PNG
+  // 1. Video files (MP4, MOV, WEBM, AVI, MKV): extract a crisp representative keyframe
+  const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|webm|avi|wmv|mkv)$/i.test(file.name);
+  if (isVideo) {
+    try {
+      const frame = await extractVideoFrame(file);
+      return frame;
+    } catch (e) {
+      console.warn('Video frame extraction failed, trying fallback:', e);
+      // If video frame extraction fails and file is small (< 2MB), try raw base64
+      if (file.size < 2 * 1024 * 1024) {
+        try {
+          const raw = await convertFileToBase64(file);
+          const match = raw.match(/^data:([^;]+);base64,(.+)$/);
+          if (match && match[2]) {
+            return { mimeType: match[1] || 'image/jpeg', base64: match[2] };
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+  }
+
+  // 2. Vector SVG: rasterize via canvas to high-quality PNG
   const isSvg = file.type === 'image/svg+xml' || file.name.toLowerCase().endsWith('.svg');
   if (isSvg) {
     try {
@@ -1538,7 +1673,7 @@ export async function prepareImageBase64AndMime(file: File): Promise<PreparedMed
     }
   }
 
-  // 2. Vector EPS / AI: try extracting embedded thumbnail
+  // 3. Vector EPS / AI: try extracting embedded thumbnail
   const isVectorExt = /\.(eps|ai)$/i.test(file.name) || file.type.includes('eps') || file.type.includes('postscript') || file.type.includes('illustrator');
   if (isVectorExt) {
     try {
@@ -1554,8 +1689,8 @@ export async function prepareImageBase64AndMime(file: File): Promise<PreparedMed
     }
   }
 
-  // 3. Small raster files (< 300 KB), GIF, or video: read directly
-  if (file.size < 300 * 1024 || file.type === 'image/gif' || file.type.startsWith('video/')) {
+  // 4. Small raster files (< 300 KB) or GIF: read directly
+  if (file.size < 300 * 1024 || file.type === 'image/gif') {
     try {
       const rawDataUrl = await convertFileToBase64(file);
       const match = rawDataUrl.match(/^data:([^;]+);base64,(.+)$/);

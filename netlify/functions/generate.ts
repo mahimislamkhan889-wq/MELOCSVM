@@ -27,9 +27,17 @@ export async function handler(event: any, context: any) {
 
   try {
     const { model, contents, config, customApiKey } = JSON.parse(event.body || "{}");
-    const clientKey = (customApiKey || "").trim();
-    const serverKey = (process.env.GEMINI_API_KEY || "").trim();
-    const keysToTry = [clientKey, serverKey].filter((k, idx, arr) => Boolean(k) && arr.indexOf(k) === idx) as string[];
+    const clientKeys = (customApiKey || "")
+      .split(/[\n,;]+/)
+      .map((k: string) => k.trim())
+      .filter(Boolean);
+
+    const serverKeys = (process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEYS || "")
+      .split(/[\n,;]+/)
+      .map((k: string) => k.trim())
+      .filter(Boolean);
+
+    const keysToTry = Array.from(new Set([...clientKeys, ...serverKeys]));
 
     if (keysToTry.length === 0) {
       return {
@@ -39,13 +47,13 @@ export async function handler(event: any, context: any) {
       };
     }
 
-    let targetModel = model || "gemini-3.1-flash-lite";
-    if (!targetModel || targetModel === "gemini-2.5-flash" || targetModel.includes("2.0-flash") || !targetModel.startsWith("gemini-")) {
-      targetModel = "gemini-3.1-flash-lite";
+    let targetModel = model || "gemini-3.8-flash";
+    if (!targetModel || targetModel.includes("2.0-flash") || targetModel === "gemini-2.5-flash" || !targetModel.startsWith("gemini-")) {
+      targetModel = "gemini-3.8-flash";
     }
 
-    const candidateModels = [targetModel, "gemini-3.1-flash-lite", "gemini-3.8-flash", "gemini-flash-latest"]
-      .filter((m, idx, arr) => m && arr.indexOf(m) === idx);
+    const candidateModels = [targetModel, "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
+      .filter((m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx);
 
     let response: any = null;
     let lastGenErr: any = null;
@@ -57,20 +65,27 @@ export async function handler(event: any, context: any) {
       });
       for (const modelCandidate of candidateModels) {
         try {
+          const modelConfig: any = {
+            systemInstruction: config?.systemInstruction,
+            responseMimeType: config?.responseMimeType || "application/json",
+            maxOutputTokens: typeof config?.maxOutputTokens === "number" ? Math.min(config.maxOutputTokens, 8192) : 4096,
+          };
+
+          if (modelCandidate.includes("3.8-flash") || modelCandidate.includes("flash-lite")) {
+            modelConfig.thinkingConfig = { thinkingLevel: "LOW" };
+          }
+
           response = await genAI.models.generateContent({
             model: modelCandidate,
             contents,
-            config: {
-              ...config,
-              systemInstruction: config?.systemInstruction
-            }
+            config: modelConfig
           });
           if (response && response.text) {
             break;
           }
         } catch (err: any) {
           lastGenErr = err;
-          console.warn(`Netlify model ${modelCandidate} failed (${err?.status || err?.message?.slice(0, 80)}). Trying fallback...`);
+          console.warn(`Netlify model ${modelCandidate} failed (${err?.status || err?.message?.slice(0, 80)}).`);
         }
       }
       if (response && response.text) {
@@ -92,33 +107,38 @@ export async function handler(event: any, context: any) {
       body: JSON.stringify({ text })
     };
   } catch (error: any) {
-    const errorMessage = error.message || "";
+    const errorMessage = error?.message || String(error || "");
     const isQuotaError = errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED");
 
     if (!isQuotaError) {
       console.error("Gemini Proxy Error:", error);
     }
 
-    if (errorMessage.includes("API key not valid") || errorMessage.includes("400")) {
+    const isApiKeyError = errorMessage.includes("API key not valid") || 
+                          errorMessage.includes("API_KEY_INVALID") || 
+                          errorMessage.includes("403") ||
+                          errorMessage.includes("PERMISSION_DENIED");
+
+    if (isApiKeyError) {
       return {
         statusCode: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "Invalid Gemini API Key. Please check your settings and try again." })
+        body: JSON.stringify({ error: "Invalid or missing Gemini API Key. Please verify your GEMINI_API_KEY in Netlify Site configuration > Environment variables, or click 'Configure API Key' in the app." })
       };
     }
 
-    if (errorMessage.includes("429") || errorMessage.includes("RESOURCE_EXHAUSTED")) {
+    if (isQuotaError) {
       return {
         statusCode: 429,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
-        body: JSON.stringify({ error: "API Quota Exceeded. Please try again in 1 minute, or use a different API key." })
+        body: JSON.stringify({ error: "Gemini API Quota Exceeded (429). Please wait a moment or click 'Configure API Key' to use your own API key." })
       };
     }
 
     return {
       statusCode: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ error: errorMessage || "Internal Server Error" })
+      body: JSON.stringify({ error: errorMessage || "Generation failed. Please try again." })
     };
   }
 }

@@ -1,9 +1,12 @@
 export const PROVIDER_MODELS: Record<string, { id: string, name: string }[]> = {
   google: [
-    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash (Ultra Fast & Recommended)' },
+    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Recommended & Fast)' },
     { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
-    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite' },
-    { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash' }
+    { id: 'gemini-3.1-flash-lite', name: 'Gemini 3.1 Flash-Lite' }
+  ],
+  apify: [
+    { id: 'kawsar/adobe-stock-analyzer', name: 'Adobe Stock Analyzer Actor' },
+    { id: 'apify/keyword-scraper', name: 'Microstock Keyword Scraper' }
   ],
   openrouter: [
     { id: 'anthropic/claude-3.5-sonnet', name: 'Claude 3.5 Sonnet' },

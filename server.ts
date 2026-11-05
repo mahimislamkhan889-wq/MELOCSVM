@@ -54,21 +54,29 @@ async function startServer() {
     const releaseQueue = await geminiQueue.acquire();
     try {
       const { model, contents, config, customApiKey } = req.body || {};
-      const clientKey = (customApiKey || "").trim();
-      const serverKey = (process.env.GEMINI_API_KEY || "").trim();
-      const keysToTry = [clientKey, serverKey].filter((k, idx, arr) => Boolean(k) && arr.indexOf(k) === idx) as string[];
+      const clientKeys = (customApiKey || "")
+        .split(/[\n,;]+/)
+        .map((k: string) => k.trim())
+        .filter(Boolean);
+
+      const serverKeys = (process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEYS || "")
+        .split(/[\n,;]+/)
+        .map((k: string) => k.trim())
+        .filter(Boolean);
+
+      const keysToTry = Array.from(new Set([...clientKeys, ...serverKeys]));
 
       if (keysToTry.length === 0) {
         return res.status(500).json({ error: "Gemini API Key is not configured on the server." });
       }
 
-      let targetModel = model || "gemini-2.5-flash";
+      let targetModel = model || "gemini-3.8-flash";
       // Sanitize deprecated models to high-speed stable vision model
-      if (!targetModel || targetModel.includes("2.0-flash") || !targetModel.startsWith("gemini-")) {
-        targetModel = "gemini-2.5-flash";
+      if (!targetModel || targetModel.includes("2.0-flash") || targetModel === "gemini-2.5-flash" || !targetModel.startsWith("gemini-")) {
+        targetModel = "gemini-3.8-flash";
       }
 
-      // Ultra-low latency configuration: disable thinking budget / set minimal thinking
+      // Ultra-low latency configuration: minimal thinking
       // so Gemini models return the JSON result immediately without waiting on reasoning tokens
       const genConfig: any = {};
       if (config?.systemInstruction) {
@@ -77,17 +85,14 @@ async function startServer() {
       if (config?.responseMimeType) {
         genConfig.responseMimeType = config.responseMimeType;
       }
-      if (typeof config?.temperature === "number") {
-        genConfig.temperature = config.temperature;
-      }
       if (typeof config?.maxOutputTokens === "number") {
         genConfig.maxOutputTokens = Math.max(4096, Math.min(config.maxOutputTokens, 8192));
       } else {
         genConfig.maxOutputTokens = 8192;
       }
 
-      // Fast model call prioritizing ultra-fast gemini-2.5-flash, gemini-3.8-flash, and flash-latest
-      const candidateModels = [targetModel, "gemini-2.5-flash", "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
+      // Fast model call prioritizing gemini-3.8-flash and flash-latest
+      const candidateModels = [targetModel, "gemini-3.8-flash", "gemini-flash-latest", "gemini-3.1-flash-lite"]
         .filter((m, idx, arr) => Boolean(m) && arr.indexOf(m) === idx);
 
       let response: any = null;
@@ -105,9 +110,7 @@ async function startServer() {
         for (const modelCandidate of candidateModels) {
           // Configure model-specific latency optimizations
           const modelSpecificConfig = { ...genConfig };
-          if (modelCandidate.includes("2.5-flash")) {
-            modelSpecificConfig.thinkingConfig = { thinkingBudget: 0 };
-          } else if (modelCandidate.includes("3.8-flash") || modelCandidate.includes("flash-lite")) {
+          if (modelCandidate.includes("3.8-flash") || modelCandidate.includes("flash-lite")) {
             modelSpecificConfig.thinkingConfig = { thinkingLevel: "LOW" };
           }
 
