@@ -459,128 +459,100 @@ export default function App() {
 
     const activeMode = (tab === 'admin' || tab === 'builder') ? 'metadata' : tab as AppMode;
     const currentSettings = useSettings || settingsRef.current;
-    const BATCH_SIZE = 2;
-
-    // Split eligible items into batches of 2 files to keep concurrent API calls under quota limits
-    const chunks: MediaFile[][] = [];
-    for (let i = 0; i < eligibleItems.length; i += BATCH_SIZE) {
-      chunks.push(eligibleItems.slice(i, i + BATCH_SIZE));
-    }
+    // Smart Pacing Queue for 100% Zero-Quota-Exceeded Reliability:
+    // Google Gemini Free Tier allows 15 Requests Per Minute (RPM) - 1 request per 4.0 seconds.
+    // By enforcing a safe interval of 4.3 seconds between requests (~13.9 RPM),
+    // a user can queue 100, 200, or 500 files and every file will process without touching the 15 RPM limit!
+    const SAFE_REQUEST_INTERVAL_MS = 4300;
 
     try {
-      // Process batch by batch with steady pacing to guarantee 100% visual analysis reliability
-      for (const chunk of chunks) {
-        // Mark current batch items as processing
-        setProcessingFiles(prev => {
-          const next = new Set(prev);
-          chunk.forEach(item => next.add(item.id));
-          return next;
-        });
+      for (let i = 0; i < eligibleItems.length; i++) {
+        const item = eligibleItems[i];
+        if (!filesRef.current.some(f => f.id === item.id)) continue;
 
-        setFiles(prev => prev.map(f => 
-          chunk.some(p => p.id === f.id) ? { ...f, status: 'processing', error: undefined } : f
-        ));
+        const itemStartTime = Date.now();
 
-        // Process files in the current batch with a 600ms stagger
-        const batchPromises = chunk.map(async (item, itemIdx) => {
-          if (!filesRef.current.some(f => f.id === item.id)) {
-            return { id: item.id, status: 'cancelled' as const };
-          }
+        // Mark current item as processing
+        setProcessingFiles(prev => new Set(prev).add(item.id));
+        setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'processing', error: undefined } : f));
 
-          if (itemIdx > 0) {
-            await new Promise(r => setTimeout(r, itemIdx * 600));
-          }
+        const abortController = new AbortController();
+        abortControllersRef.current.set(item.id, abortController);
 
-          const abortController = new AbortController();
-          abortControllersRef.current.set(item.id, abortController);
-          const itemStartTime = Date.now();
-          
-          try {
-            const result = await processMedia(
-              item.file, 
-              activeMode, 
-              currentSettings, 
-              (provider, newKey, failedKeys, invalidKeys) => {
-                setSettings(prev => {
-                  const currentConfig = prev.apiConfigs[provider];
-                  let newSavedKeys = currentConfig.savedKeys || [];
-                  
-                  if (invalidKeys && invalidKeys.length > 0) {
-                    newSavedKeys = newSavedKeys.filter(sk => !invalidKeys.includes(sk.key));
-                  }
-                  newSavedKeys = newSavedKeys.map((k, idx) => ({ ...k, name: `S${idx + 1}` }));
-                  
-                  let finalNewKey = newKey || currentConfig.apiKey;
-                  if (!newKey && failedKeys && failedKeys.includes(finalNewKey)) {
-                    finalNewKey = newSavedKeys.length > 0 ? newSavedKeys[0].key : '';
-                  }
-                  
-                  return {
-                    ...prev,
-                    apiConfigs: {
-                      ...prev.apiConfigs,
-                      [provider]: {
-                        ...currentConfig,
-                        apiKey: finalNewKey,
-                        savedKeys: newSavedKeys
-                      }
+        try {
+          const result = await processMedia(
+            item.file,
+            activeMode,
+            currentSettings,
+            (provider, newKey, failedKeys, invalidKeys) => {
+              setSettings(prev => {
+                const currentConfig = prev.apiConfigs[provider];
+                let newSavedKeys = currentConfig.savedKeys || [];
+
+                if (invalidKeys && invalidKeys.length > 0) {
+                  newSavedKeys = newSavedKeys.filter(sk => !invalidKeys.includes(sk.key));
+                }
+                newSavedKeys = newSavedKeys.map((k, idx) => ({ ...k, name: `S${idx + 1}` }));
+
+                let finalNewKey = newKey || currentConfig.apiKey;
+                if (!newKey && failedKeys && failedKeys.includes(finalNewKey)) {
+                  finalNewKey = newSavedKeys.length > 0 ? newSavedKeys[0].key : '';
+                }
+
+                return {
+                  ...prev,
+                  apiConfigs: {
+                    ...prev.apiConfigs,
+                    [provider]: {
+                      ...currentConfig,
+                      apiKey: finalNewKey,
+                      savedKeys: newSavedKeys
                     }
-                  };
-                });
-              }, 
-              abortController.signal
-            );
+                  }
+                };
+              });
+            },
+            abortController.signal
+          );
 
-            const durationMs = Date.now() - itemStartTime;
-            return { id: item.id, status: 'done' as const, result, processingTimeMs: durationMs };
-          } catch (err: any) {
-            const durationMs = Date.now() - itemStartTime;
-            if (err.name === 'AbortError') {
-              return { id: item.id, status: 'cancelled' as const, processingTimeMs: durationMs };
-            }
-            return { id: item.id, status: 'error' as const, error: err instanceof Error ? err.message : 'Processing failed', processingTimeMs: durationMs };
-          } finally {
-            abortControllersRef.current.delete(item.id);
+          const durationMs = Date.now() - itemStartTime;
+
+          // Deduct credits for this successful file
+          if (currentUser?.uid && !isAdmin && userCredits.plan !== 'unlimited') {
+            deductCredits(
+              currentUser.uid,
+              COST_PER_FILE,
+              `Generated SEO metadata for ${item.file.name}`
+            ).catch(e => console.warn('Credit deduction error:', e));
           }
-        });
 
-        // Wait for all 5 items in this batch to complete
-        const batchResults = await Promise.all(batchPromises);
-
-        // Deduct credits for successfully processed files
-        const successCount = batchResults.filter(r => r.status === 'done').length;
-        if (successCount > 0 && currentUser?.uid) {
-          deductCredits(
-            currentUser.uid, 
-            successCount * COST_PER_FILE, 
-            `Generated SEO metadata for ${successCount} file(s)`
-          ).catch((e) => console.warn('Credit deduction error:', e));
+          // Update file to done immediately
+          setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'done', result, processingTimeMs: durationMs } : f));
+        } catch (err: any) {
+          const durationMs = Date.now() - itemStartTime;
+          if (err.name === 'AbortError') {
+            setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'pending', processingTimeMs: durationMs } : f));
+          } else {
+            setFiles(prev => prev.map(f => f.id === item.id ? { ...f, status: 'error', error: err instanceof Error ? err.message : 'Processing failed', processingTimeMs: durationMs } : f));
+          }
+        } finally {
+          abortControllersRef.current.delete(item.id);
+          setProcessingFiles(prev => {
+            const next = new Set(prev);
+            next.delete(item.id);
+            return next;
+          });
         }
 
-        // Atomically update ALL 5 files from PROCESSING to SUCCESS together at the exact same moment!
-        const resultMap = new Map(batchResults.map(r => [r.id, r]));
-
-        setFiles(prev => prev.map(f => {
-          const itemRes = resultMap.get(f.id);
-          if (!itemRes || itemRes.status === 'cancelled') return f;
-          if (itemRes.status === 'done') {
-            return { ...f, status: 'done', result: itemRes.result, processingTimeMs: itemRes.processingTimeMs };
+        // Pacing delay: ensure at least SAFE_REQUEST_INTERVAL_MS has elapsed before starting next file
+        if (i < eligibleItems.length - 1) {
+          const elapsed = Date.now() - itemStartTime;
+          if (elapsed < SAFE_REQUEST_INTERVAL_MS) {
+            await new Promise(r => setTimeout(r, SAFE_REQUEST_INTERVAL_MS - elapsed));
           }
-          if (itemRes.status === 'error') {
-            return { ...f, status: 'error', error: itemRes.error, processingTimeMs: itemRes.processingTimeMs };
-          }
-          return f;
-        }));
-
-        // Remove batch items from processingFiles together
-        setProcessingFiles(prev => {
-          const next = new Set(prev);
-          chunk.forEach(item => next.delete(item.id));
-          return next;
-        });
+        }
       }
     } finally {
-      // Entire session finished across all chunks ("process all ok")
       setIsProcessingSession(false);
     }
   };

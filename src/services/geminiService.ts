@@ -387,7 +387,8 @@ export async function processMedia(
 
         if ((isRateLimit || isServerBusy || isQuotaError) && retryCount < MAX_RETRIES_PER_KEY) {
           retryCount++;
-          await sleep(2000 * retryCount);
+          const waitMs = (isRateLimit || isQuotaError) ? (8000 + retryCount * 5000) : (2000 * retryCount);
+          await sleep(waitMs);
           continue;
         }
         

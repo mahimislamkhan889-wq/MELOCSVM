@@ -4,11 +4,11 @@ import { GoogleGenAI } from "@google/genai";
 
 // Concurrency throttler to keep concurrent outbound calls under API rate limits
 class GeminiThrottleQueue {
-  private maxConcurrent = 2;
+  private maxConcurrent = 1;
   private currentRunning = 0;
   private queue: (() => void)[] = [];
   private lastCallTime = 0;
-  private minIntervalMs = 400;
+  private minIntervalMs = 4300; // Guarantees <= 13.9 requests per minute (strictly under 15 RPM limit)
 
   async acquire(): Promise<() => void> {
     if (this.currentRunning >= this.maxConcurrent) {
