@@ -41,6 +41,26 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["id", "name", "role", "quote", "rating", "createdAt"]
+    },
+    "MuseAiConfig": {
+      "title": "Muse AI System Configuration",
+      "description": "Non-secret Admin routing configuration for the Muse AI primary execution engine.",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "connected": { "type": "boolean" },
+        "accountName": { "type": "string", "maxLength": 120 },
+        "accountEmail": { "type": "string", "maxLength": 160 },
+        "model": { "type": "string", "maxLength": 120 },
+        "baseUrl": { "type": "string", "maxLength": 240 },
+        "fallbackToGemini": { "type": "boolean" },
+        "requestIntervalMs": { "type": "number" },
+        "customSystemDirective": { "type": "string", "maxLength": 2000 },
+        "keyHint": { "type": "string", "maxLength": 40 },
+        "updatedBy": { "type": "string", "maxLength": 160 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["enabled", "model", "baseUrl"]
     }
   },
   "firestore": {
@@ -51,6 +71,10 @@
     "/reviews/{reviewId}": {
       "schema": "Review",
       "description": "Contributor reviews and testimonials."
+    },
+    "/system_config/{configId}": {
+      "schema": "MuseAiConfig",
+      "description": "System-wide non-secret API integration routing configuration."
     }
   }
 }

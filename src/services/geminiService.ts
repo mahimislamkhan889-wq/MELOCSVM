@@ -10,6 +10,10 @@ import {
   validateApifyToken,
   saveStoredApifyToken
 } from './apifyService';
+import {
+  fetchMuseStatus,
+  executeMuseVisionTask
+} from './museAiService';
 
 // No module-level initialization to avoid browser errors
 
@@ -239,6 +243,203 @@ export async function processMedia(
   }
 
   const systemInstruction = generateSystemInstruction(mode, file, settings, isImageOrVideo);
+
+  const finalizeResult = async (rawResult: GeneratedResult): Promise<GeneratedResult> => {
+    let result = { ...rawResult };
+
+    // Forced single-word keyword sanitization if enabled
+    if (mode === 'metadata' && settings.singleWordKeywords && result.keywords) {
+      result.keywords = result.keywords
+        .split(',')
+        .map(k => k.trim())
+        .filter(Boolean)
+        .map(k => k.split(/[\s-]+/)[0])
+        .filter(Boolean)
+        .join(', ');
+    }
+
+    // Retain full metadata (Title, Description, Keywords) so user always gets complete professional metadata
+    if (mode === 'metadata') {
+      if (!result.title && result.description) {
+        result.title = result.description.split('.')[0] || '';
+      }
+      if (!result.description && result.title) {
+        result.description = `${result.title}. High quality visual asset suitable for professional design, marketing, and web projects.`;
+      }
+    }
+
+    const stripPlaceholders = (val: string) => {
+      if (!val) return '';
+      const cleaned = val.replace(/^\s*\.\.\.\s*$/, '').trim();
+      return cleaned === '...' ? '' : cleaned;
+    };
+
+    if (mode === 'metadata') {
+      if (isApifyConfigured() || isApifyAutoScrapeEnabled()) {
+        try {
+          result.keywords = await enrichWithApifyKeywords(
+            result.keywords || '',
+            result.title || file.name,
+            settings.platform,
+            Math.max(45, settings.keywordWords || 50),
+            settings.singleWordKeywords
+          );
+        } catch (e) {
+          console.warn('Apify tag enrichment warning:', e);
+        }
+      }
+
+      result.title = stripPlaceholders(result.title || '');
+      result.keywords = stripPlaceholders(result.keywords || '');
+      result.description = stripPlaceholders(result.description || '');
+
+      result = ensureRichMetadata(result, file, settings);
+
+      if (result.title) {
+        if (result.title.length > 195) {
+          const clipped = result.title.substring(0, 195);
+          const lastSpace = clipped.lastIndexOf(' ');
+          result.title = (lastSpace > 120 ? clipped.substring(0, lastSpace) : clipped).replace(/[\.\,\;\:\!\?\-]+$/, '').trim();
+        } else {
+          result.title = result.title.replace(/[\.\,\;\:\!\?\-]+$/, '').trim();
+        }
+      }
+      if (result.description && (settings.platform === 'shutterstock' || settings.platform === 'general')) {
+        if (result.description.length > 240) {
+          const clipped = result.description.substring(0, 240);
+          const lastSpace = clipped.lastIndexOf(' ');
+          result.description = (lastSpace > 150 ? clipped.substring(0, lastSpace) : clipped).replace(/[\.\,\;\:\!\?\-]+$/, '').trim() + '.';
+        }
+      }
+    } else if (mode === 'prompt') {
+      let promptClean = stripPlaceholders(result.prompt || '');
+      promptClean = promptClean.replace(/^(?:\*\*.*?\*\*|\*.*?\*|#{1,6}\s*.*?\n|Prompt:|Image Prompt:|Suggested Prompt:|(?:Here is|Here's).*?:)\s*/i, '');
+      promptClean = removeCommercialWord(promptClean);
+      promptClean = promptClean.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+      result.prompt = promptClean;
+      if (result.detectedSubject) result.detectedSubject = removeCommercialWord(result.detectedSubject);
+      if (result.detectedStyle) result.detectedStyle = removeCommercialWord(result.detectedStyle);
+    }
+
+    // Final pass: ensure strict zero usage of the word "commercial"
+    if (result.title) result.title = removeCommercialWord(result.title);
+    if (result.description) result.description = removeCommercialWord(result.description);
+    if (result.keywords) result.keywords = removeCommercialWord(result.keywords);
+    if (result.prompt) result.prompt = removeCommercialWord(result.prompt);
+    if (result.detectedSubject) result.detectedSubject = removeCommercialWord(result.detectedSubject);
+    if (result.detectedStyle) result.detectedStyle = removeCommercialWord(result.detectedStyle);
+
+    return result;
+  };
+
+  // 1.5 PRIMARY ENGINE CHECK: Route every uploaded file through Admin's connected Muse AI account when active
+  try {
+    const museStatus = await fetchMuseStatus();
+    if (museStatus.enabled && museStatus.connected) {
+      let museUserPrompt = '';
+      if (isImageOrVideo && base64Data) {
+        let promptInstruction = settings.exactRecreation
+          ? `EXACT 1:1 VISUAL RECREATION DIRECTIVE:
+You are directly viewing the binary pixels of this reference image.
+Your mission is to engineer an image generation prompt that will RECREATE THIS EXACT REFERENCE IMAGE in Midjourney / Flux / DALL-E / Stable Diffusion.
+1. EXACT HERO SUBJECT & INVENTORY: Accurately list and describe EVERY SINGLE element visible in this reference image.
+2. EXACT SPATIAL ARRANGEMENT: Specify the precise position of each element (center, left, right, foreground, background).
+3. EXACT TYPOGRAPHY: If this reference image contains ANY text, slogan, quote, word, or badge number, extract it letter-by-letter verbatim inside quotes.
+4. EXACT ARTISTIC MEDIUM & STYLE: State the exact visual technique (flat 2D vector graphic, digital illustration, studio photography, watercolor, 3D Octane render, isometric CGI, minimal icon).
+5. EXACT COLOR PALETTE & LIGHTING: Describe the specific colors, lighting sources, and textures.
+6. ZERO DEVIATION & NO FILE HASHES: Base everything strictly on what is visually seen in the image pixels. NEVER use the word "commercial" or "Commercial" anywhere.
+Length: strictly 45 to 65 words of high-density visual terminology.`
+          : `INSPIRATION & STOCK-SAFE PROMPT DIRECTIVE:
+You are directly viewing this reference image to generate a COPYRIGHT-SAFE, HIGH-CONVERTING PROMPT.
+STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere in the prompt!
+1. THEMATIC ADHERENCE: Strictly adhere to the exact subject, concept, setting, props, and artistic style of this reference image.
+2. COPYRIGHT PROTECTION (ZERO PLAGIARISM): Re-imagine the composition with fresh, original framing, perspective, and lighting for Adobe Stock, Freepik, and Shutterstock safety.
+3. DETAILED PRODUCTION TERMINOLOGY: Specify the hero subject, artistic pipeline, framing, physical lighting, surface textures, and color grading.
+Length: strictly 45 to 65 words of professional art-direction terminology.`;
+
+        if (settings.whiteBackground) {
+          promptInstruction += ' Isolate the subject on a pure white background with clean catalog lighting.';
+        } else if (settings.transparentBackground) {
+          promptInstruction += ' Isolate the subject on a clean studio background.';
+        }
+        if (settings.silhouette) {
+          promptInstruction += ' Create a dramatic dark silhouette outline of the subject.';
+        }
+        if (settings.extraText) {
+          promptInstruction += ' Ensure composition with balanced negative space suitable for typography overlay.';
+        }
+        promptInstruction += ' If the image contains text, extract it with 100% letter-by-letter accuracy and include it in quotes.';
+
+        museUserPrompt = mode === 'prompt'
+          ? promptInstruction
+          : `CRITICAL VISUAL TRUTH & MARKET METADATA DIRECTIVE:
+You are directly viewing the authentic visual pixels of this file.
+Generate MARKET-OPTIMIZED metadata engineered for Adobe Stock, Freepik, and Shutterstock based SOLELY on what is visible in the file.
+STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere in the title, description, or keywords!
+1. DIRECT VISUAL RECOGNITION: Identify the exact primary subject, objects, setting, colors, embedded text (verbatim), asset format, and actual background directly from the image pixels.
+2. TOP-SELLER TITLE (Strictly 20 to 30 words, 120-195 characters, NO trailing period, zero trademarks, zero usage of the word "commercial").
+3. STRICTLY 45 TO 50 KEYWORDS (never fewer than 40, front-load the first 10 keywords with primary visual nouns seen in the image).
+Return strictly valid JSON.`;
+      } else {
+        museUserPrompt = mode === 'prompt'
+          ? `Analyze file "${file.name}" and write a pristine 45-65 word image generation prompt in JSON format. Do NOT use the word "commercial".`
+          : `Analyze file "${file.name}". Generate a long stock title (20-30 words, no trailing period) and 45-50 keywords in valid JSON format. Do NOT use the word "commercial".`;
+      }
+
+      const museTemperature = mode === 'prompt' ? (settings.exactRecreation ? 0.15 : 0.45) : 0.35;
+      let museLastErr: any = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const museRes = await executeMuseVisionTask({
+            systemInstruction,
+            userPrompt: museUserPrompt,
+            imageBase64: isImageOrVideo ? base64Data : undefined,
+            imageMimeType: mediaMimeType || 'image/jpeg',
+            temperature: museTemperature,
+            maxTokens: 4096,
+            signal,
+          });
+          const parsedMuse = parseAndAutoRepairResponse(
+            museRes.text,
+            mode,
+            file,
+            settings,
+            'muse',
+            museRes.model
+          );
+          const finalizedMuse = await finalizeResult(parsedMuse);
+          finalizedMuse.usedProvider = 'muse';
+          finalizedMuse.usedModel = museRes.model;
+          finalizedMuse.usedKeyIndex = 1;
+          finalizedMuse.usedKeyName = museStatus.accountName || 'Muse AI';
+          finalizedMuse.usedExactMode = !!settings.exactRecreation;
+          return finalizedMuse;
+        } catch (museErr: any) {
+          if (museErr?.name === 'AbortError' || signal?.aborted) {
+            throw museErr;
+          }
+          museLastErr = museErr;
+          if (attempt === 0) {
+            await sleep(1500);
+          }
+        }
+      }
+
+      if (!museStatus.fallbackToGemini) {
+        throw museLastErr || new Error('Muse AI failed to process this file. Check Admin Control Center > Muse AI Engine.');
+      }
+      console.warn('Muse AI execution failed, falling back to configured provider:', museLastErr?.message);
+    }
+  } catch (museOuterErr: any) {
+    if (museOuterErr?.name === 'AbortError' || signal?.aborted) {
+      throw museOuterErr;
+    }
+    const latestStatus = await fetchMuseStatus().catch(() => null);
+    if (latestStatus?.enabled && latestStatus?.connected && !latestStatus.fallbackToGemini) {
+      throw museOuterErr;
+    }
+  }
+
   const failedKeys: string[] = [];
   const invalidKeys: string[] = [];
 
@@ -253,91 +454,7 @@ export async function processMedia(
     while (retryCount <= MAX_RETRIES_PER_KEY) {
       try {
         let result = await performApiCall(mode, file, provider, config, currentKey, systemInstruction, base64Data, isImageOrVideo, settings, signal, mediaMimeType);
-        
-        // Forced single-word keyword sanitization if enabled
-        if (mode === 'metadata' && settings.singleWordKeywords && result.keywords) {
-          result.keywords = result.keywords
-            .split(',')
-            .map(k => k.trim())
-            .filter(Boolean)
-            .map(k => k.split(/[\s-]+/)[0])
-            .filter(Boolean)
-            .join(', ');
-        }
-
-        // Retain full metadata (Title, Description, Keywords) so user always gets complete professional metadata
-        if (mode === 'metadata') {
-          if (!result.title && result.description) {
-            result.title = result.description.split('.')[0] || '';
-          }
-          if (!result.description && result.title) {
-            result.description = `${result.title}. High quality commercial visual asset suitable for professional design, marketing, and web projects.`;
-          }
-        }
-        
-        const stripPlaceholders = (val: string) => {
-          if (!val) return '';
-          const cleaned = val.replace(/^\s*\.\.\.\s*$/, '').trim();
-          return cleaned === '...' ? '' : cleaned;
-        };
-
-        if (mode === 'metadata') {
-          // If Apify is configured or auto-scrape is enabled, enrich tags with Apify microstock competitor scraping
-          if (isApifyConfigured() || isApifyAutoScrapeEnabled()) {
-            try {
-              result.keywords = await enrichWithApifyKeywords(
-                result.keywords || '',
-                result.title || file.name,
-                settings.platform,
-                Math.max(45, settings.keywordWords || 50),
-                settings.singleWordKeywords
-              );
-            } catch (e) {
-              console.warn('Apify tag enrichment warning:', e);
-            }
-          }
-
-          result.title = stripPlaceholders(result.title || '');
-          result.keywords = stripPlaceholders(result.keywords || '');
-          result.description = stripPlaceholders(result.description || '');
-
-          // Guarantee long, descriptive title and at least 40+ to 50 keywords
-          result = ensureRichMetadata(result, file, settings);
-
-          // Final safety formatting checks for stock platforms
-          if (result.title) {
-            if (result.title.length > 195) {
-              const clipped = result.title.substring(0, 195);
-              const lastSpace = clipped.lastIndexOf(' ');
-              result.title = (lastSpace > 120 ? clipped.substring(0, lastSpace) : clipped).replace(/[\.\,\;\:\!\?\-]+$/, '').trim();
-            } else {
-              result.title = result.title.replace(/[\.\,\;\:\!\?\-]+$/, '').trim();
-            }
-          }
-          if (result.description && (settings.platform === 'shutterstock' || settings.platform === 'general')) {
-            if (result.description.length > 240) {
-              const clipped = result.description.substring(0, 240);
-              const lastSpace = clipped.lastIndexOf(' ');
-              result.description = (lastSpace > 150 ? clipped.substring(0, lastSpace) : clipped).replace(/[\.\,\;\:\!\?\-]+$/, '').trim() + '.';
-            }
-          }
-        } else if (mode === 'prompt') {
-          let promptClean = stripPlaceholders(result.prompt || '');
-          promptClean = promptClean.replace(/^(?:\*\*.*?\*\*|\*.*?\*|#{1,6}\s*.*?\n|Prompt:|Image Prompt:|Suggested Prompt:|(?:Here is|Here's).*?:)\s*/i, '');
-          promptClean = removeCommercialWord(promptClean);
-          promptClean = promptClean.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-          result.prompt = promptClean;
-          if (result.detectedSubject) result.detectedSubject = removeCommercialWord(result.detectedSubject);
-          if (result.detectedStyle) result.detectedStyle = removeCommercialWord(result.detectedStyle);
-        }
-        
-        // Final pass: ensure strict zero usage of the word "commercial"
-        if (result.title) result.title = removeCommercialWord(result.title);
-        if (result.description) result.description = removeCommercialWord(result.description);
-        if (result.keywords) result.keywords = removeCommercialWord(result.keywords);
-        if (result.prompt) result.prompt = removeCommercialWord(result.prompt);
-        if (result.detectedSubject) result.detectedSubject = removeCommercialWord(result.detectedSubject);
-        if (result.detectedStyle) result.detectedStyle = removeCommercialWord(result.detectedStyle);
+        result = await finalizeResult(result);
 
         if ((i > 0 || failedKeys.length > 0 || invalidKeys.length > 0) && onKeyUpdate) {
           onKeyUpdate(provider, currentKey, failedKeys, invalidKeys);
@@ -347,6 +464,7 @@ export async function processMedia(
         result.usedKeyName = candidate.name;
         result.usedExactMode = !!settings.exactRecreation;
         return result;
+        
       } catch (error: any) {
         lastError = error;
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -1239,12 +1357,28 @@ STRICT BANNED WORD: NEVER include the word "Commercial" or "commercial" anywhere
         try {
           const errJson = await netRes.json();
           errMessage = errJson?.error || errJson?.message;
+          if (typeof errMessage === 'object') {
+            errMessage = JSON.stringify(errMessage);
+          }
         } catch {
           const text = await netRes.text().catch(() => '');
           if (text && text.length < 300) errMessage = text;
         }
+
+        // Clean raw JSON error strings if present
+        if (errMessage && (errMessage.startsWith('{') || errMessage.includes('"message":'))) {
+          try {
+            const parsed = JSON.parse(errMessage);
+            errMessage = parsed.error?.message || parsed.message || errMessage;
+          } catch {
+            // keep errMessage
+          }
+        }
+
         let finalErr = errMessage || `Server generation error: ${netRes.status}`;
-        if (netRes.status === 400 && (!errMessage || errMessage.includes('400'))) {
+        if (netRes.status === 429 || finalErr.includes('429') || finalErr.toLowerCase().includes('quota') || finalErr.includes('RESOURCE_EXHAUSTED')) {
+          finalErr = "Gemini API Quota Exceeded (429). The API key reached its rate limit or has 0 quota in Google Cloud. Click 'Configure API Key' to enter a fresh key or wait a moment.";
+        } else if (netRes.status === 400 && (!errMessage || errMessage.includes('400'))) {
           finalErr = "Gemini API Key is missing or invalid on the server (400). Please check your API key configuration in settings.";
         }
         throw new Error(finalErr);
@@ -1299,7 +1433,7 @@ function parseAndAutoRepairResponse(
   mode: AppMode,
   file: File,
   settings: GenerationSettings,
-  provider: ApiProvider,
+  provider: ApiProvider | 'muse',
   model: string
 ): GeneratedResult {
   // 1. Direct clean JSON parse attempt

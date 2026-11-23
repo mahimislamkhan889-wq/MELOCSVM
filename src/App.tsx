@@ -3,7 +3,7 @@ import { Download, UploadCloud, FileImage, Settings, Image as ImageIcon, Tags, T
 import { AppMode, Platform, GenerationSettings, GeneratedResult, processMedia } from './services/geminiService';
 import { cn, exportToCSV, generateId } from './lib/utils';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Phone, ArrowRight, X, Moon, Sun, Camera, Lock } from 'lucide-react';
+import { Phone, ArrowRight, X, Moon, Sun, Camera, Lock, Palette } from 'lucide-react';
 
 
 import { db, auth } from './lib/firebase';
@@ -20,6 +20,7 @@ import { AdminUsersModal } from './components/AdminUsersModal';
 import { ProfileAvatarModal } from './components/ProfileAvatarModal';
 import { ApiConfigModal } from './components/ApiConfigModal';
 import { TrackerSection } from './components/TrackerSection';
+import { DesignSection } from './components/DesignSection';
 import { resolveUserAvatar, getFallbackAvatarUrl } from './lib/avatarHelper';
 import { syncUserOnLogin } from './services/userSyncService';
 import { 
@@ -30,6 +31,7 @@ import {
   COST_PER_FILE 
 } from './services/creditService';
 import { extractEmbeddedVectorThumbnail, rasterizeSvgToPng } from './lib/vectorUtils';
+import { fetchMuseStatus, getCachedMuseStatus } from './services/museAiService';
 
 interface MediaFile {
   id: string;
@@ -41,7 +43,7 @@ interface MediaFile {
   processingTimeMs?: number;
 }
 
-type TabType = AppMode | 'admin' | 'builder' | 'calendar' | 'landing' | 'reviews' | 'tracker';
+type TabType = AppMode | 'admin' | 'builder' | 'calendar' | 'landing' | 'reviews' | 'tracker' | 'design';
 
 declare global {
   interface Window {
@@ -139,6 +141,10 @@ export default function App() {
     });
     return () => unsubscribe();
   }, [currentUser?.uid]);
+
+  useEffect(() => {
+    fetchMuseStatus(true).catch(() => {});
+  }, []);
 
   useEffect(() => {
     // Check if user is returning from a Google redirect sign-in
@@ -459,11 +465,13 @@ export default function App() {
 
     const activeMode = (tab === 'admin' || tab === 'builder') ? 'metadata' : tab as AppMode;
     const currentSettings = useSettings || settingsRef.current;
-    // Smart Pacing Queue for 100% Zero-Quota-Exceeded Reliability:
-    // Google Gemini Free Tier allows 15 Requests Per Minute (RPM) - 1 request per 4.0 seconds.
-    // By enforcing a safe interval of 4.3 seconds between requests (~13.9 RPM),
-    // a user can queue 100, 200, or 500 files and every file will process without touching the 15 RPM limit!
-    const SAFE_REQUEST_INTERVAL_MS = 4300;
+    // Smart Pacing Queue:
+    // If Muse AI is active in Admin Control Center, use its configured pacing interval (default 1200ms).
+    // Otherwise enforce 4.3s interval for Google Gemini Free Tier 15 RPM safety.
+    const liveMuseStatus = await fetchMuseStatus().catch(() => getCachedMuseStatus());
+    const SAFE_REQUEST_INTERVAL_MS = (liveMuseStatus?.enabled && liveMuseStatus?.connected)
+      ? Math.max(300, liveMuseStatus.requestIntervalMs || 1200)
+      : 4300;
 
     try {
       for (let i = 0; i < eligibleItems.length; i++) {
@@ -883,6 +891,15 @@ export default function App() {
                 <TrendingUp size={15}/> <span>Tracker</span>
               </button>
               <button
+                onClick={() => setTab('design')}
+                className={cn(
+                  "px-3.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-all duration-300 flex items-center gap-1.5 sm:gap-2 cursor-pointer",
+                  tab === 'design' ? 'bg-[#ECEEF4] dark:bg-[#2A334A] text-zinc-900 dark:text-zinc-50 shadow-2xs' : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
+                )}
+              >
+                <Palette size={15}/> <span>Design</span>
+              </button>
+              <button
                 onClick={() => setTab('calendar')}
                 className={cn(
                   "px-3.5 sm:px-4 py-1.5 rounded-full text-xs sm:text-sm font-medium transition-all duration-300 flex items-center gap-1.5 sm:gap-2 cursor-pointer",
@@ -1104,13 +1121,70 @@ export default function App() {
               setTab('prompt');
             }}
           />
+        ) : tab === 'design' ? (
+          <DesignSection isAdmin={isAdmin} />
         ) : tab === 'tracker' ? (
-          <TrackerSection 
-            onStartMetadata={() => setTab('metadata')}
-            onStartPrompt={() => setTab('prompt')}
-          />
+          <div className="relative">
+            <div
+              aria-hidden="true"
+              className="blur-[2px] select-none pointer-events-none opacity-90 transition-all duration-300"
+            >
+              <TrackerSection 
+                onStartMetadata={() => setTab('metadata')}
+                onStartPrompt={() => setTab('prompt')}
+              />
+            </div>
+
+            <div className="absolute inset-0 z-20 flex items-start justify-center pt-20 sm:pt-28 px-4 rounded-3xl bg-white/15 dark:bg-[#0D111C]/20">
+              <motion.div
+                key="upcoming-tracker"
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="w-full max-w-md bg-white dark:bg-[#161B28] border border-zinc-200 dark:border-white/10 rounded-3xl p-8 shadow-2xl text-center space-y-5"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white flex items-center justify-center mx-auto">
+                  <Clock size={22} />
+                </div>
+
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-bold font-display tracking-tight text-zinc-900 dark:text-white">
+                    Upcoming
+                  </h2>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                    The Tracker workspace is currently being upgraded and will be available soon.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setTab('calendar')}
+                    className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-900 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <span>Open Calendar</span>
+                    <ArrowRight size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTab('landing')}
+                    className="px-4 py-2.5 rounded-xl text-xs font-medium border border-zinc-300 dark:border-white/15 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Back to Home
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+          <div className="relative">
+          <div
+            aria-hidden={tab === 'metadata' || tab === 'prompt'}
+            className={cn(
+              "grid grid-cols-1 lg:grid-cols-12 gap-8 items-start transition-all duration-300",
+              (tab === 'metadata' || tab === 'prompt') && "blur-[2px] select-none pointer-events-none opacity-90"
+            )}
+          >
           
           {/* Left Column: Settings */}
           <div className="w-full lg:col-span-4 flex-shrink-0 space-y-6">
@@ -1770,9 +1844,11 @@ export default function App() {
                                         <div className="inline-flex p-3 rounded-full bg-red-500/10 text-red-500 dark:text-red-400 border border-red-500/20 mb-1">
                                           <AlertCircle size={24} />
                                         </div>
-                                        <p className="text-sm text-red-600 dark:text-red-300 font-medium max-w-md mx-auto">
+                                        <p className="text-sm text-red-600 dark:text-red-300 font-medium max-w-md mx-auto leading-relaxed">
                                           {file.error?.includes('400')
-                                            ? "Netlify API Key missing or invalid (400). Click 'Configure API Key' below to enter your Gemini API Key."
+                                            ? "API Key missing or invalid (400). Click 'Configure API Key' below to enter your Gemini API Key."
+                                            : (file.error?.includes('429') || file.error?.toLowerCase().includes('quota') || file.error?.includes('RESOURCE_EXHAUSTED'))
+                                            ? "Rate limit or quota reached (429). The current key has 0 quota or reached its per-minute limit. Click 'Configure API Key' to enter a fresh key, or wait a minute."
                                             : file.error}
                                         </p>
                                         <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
@@ -1936,6 +2012,53 @@ export default function App() {
                 )}
               </div>
             </div>
+          </div>
+
+          {/* Blur Overlay & Upcoming Popup for Metadata & Image to Prompt Sections */}
+          {(tab === 'metadata' || tab === 'prompt') && (
+            <div className="absolute inset-0 z-20 flex items-start justify-center pt-20 sm:pt-28 px-4 rounded-3xl bg-white/15 dark:bg-[#0D111C]/20">
+              <motion.div
+                key={`upcoming-${tab}`}
+                initial={{ opacity: 0, scale: 0.96, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+                className="w-full max-w-md bg-white dark:bg-[#161B28] border border-zinc-200 dark:border-white/10 rounded-3xl p-8 shadow-2xl text-center space-y-5"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white flex items-center justify-center mx-auto">
+                  <Clock size={22} />
+                </div>
+
+                <div className="space-y-2">
+                  <h2 className="text-2xl font-bold font-display tracking-tight text-zinc-900 dark:text-white">
+                    Upcoming
+                  </h2>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400 leading-relaxed">
+                    {tab === 'prompt'
+                      ? 'The Image to Prompt workspace is currently being upgraded and will be available soon.'
+                      : 'The Metadata workspace is currently being upgraded and will be available soon.'}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setTab('calendar')}
+                    className="px-5 py-2.5 rounded-xl text-xs font-semibold bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-900 flex items-center gap-1.5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    <span>Open Calendar</span>
+                    <ArrowRight size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTab('landing')}
+                    className="px-4 py-2.5 rounded-xl text-xs font-medium border border-zinc-300 dark:border-white/15 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 transition-colors cursor-pointer whitespace-nowrap"
+                  >
+                    Back to Home
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
           </div>
         )}
       </main>

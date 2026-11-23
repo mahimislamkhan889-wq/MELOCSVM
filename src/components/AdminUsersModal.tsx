@@ -47,18 +47,8 @@ import {
   getFallbackAvatarUrl, 
   AVATAR_PRESETS 
 } from '../lib/avatarHelper';
-import { 
-  validateApifyToken, 
-  getStoredApifyToken, 
-  saveStoredApifyToken, 
-  getStoredApifyUser, 
-  isApifyAutoScrapeEnabled, 
-  setApifyAutoScrapeEnabled,
-  fetchApifyConfigFromFirestore,
-  saveApifyConfigToFirestore,
-  testApifyScrapeSandbox,
-  ApifyUser
-} from '../services/apifyService';
+import { MuseAiAdminPanel } from './MuseAiAdminPanel';
+import { fetchMuseStatus, MuseEngineStatus } from '../services/museAiService';
 
 export type UserStatus = 'Active' | 'Non -login' | 'Unconfirmed';
 export type UserRole = 'Staff User' | 'Administrator' | 'Account Owner' | 'Contributor';
@@ -126,30 +116,9 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
   const filterRef = useRef<HTMLDivElement>(null);
   const statusRef = useRef<HTMLDivElement>(null);
 
-  // Active Tab: Users or Apify Integration
-  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'apify'>('users');
-
-  // Apify Integration State
-  const [apifyToken, setApifyToken] = useState<string>(() => getStoredApifyToken());
-  const [showApifyToken, setShowApifyToken] = useState(false);
-  const [isApifyTesting, setIsApifyTesting] = useState(false);
-  const [apifyTestResult, setApifyTestResult] = useState<'idle' | 'success' | 'error'>('idle');
-  const [apifyStatusMessage, setApifyStatusMessage] = useState('');
-  const [apifyUser, setApifyUser] = useState<ApifyUser | null>(() => getStoredApifyUser());
-  const [apifyAutoScrape, setApifyAutoScrape] = useState(() => isApifyAutoScrapeEnabled());
-  const [apifyPlatforms, setApifyPlatforms] = useState<string[]>(['adobe', 'shutterstock', 'freepik']);
-  const [apifyMaxKeywords, setApifyMaxKeywords] = useState<number>(50);
-  const [isApifySaving, setIsApifySaving] = useState(false);
-  const [isApifySavedRecently, setIsApifySavedRecently] = useState(false);
-
-  // Sandbox Tester State
-  const [sandboxQuery, setSandboxQuery] = useState('isometric 3d illustration icon clean white background');
-  const [isSandboxRunning, setIsSandboxRunning] = useState(false);
-  const [sandboxTags, setSandboxTags] = useState<string[]>([]);
-  const [sandboxSource, setSandboxSource] = useState<string>('');
-  const [sandboxLatency, setSandboxLatency] = useState<number | null>(null);
-  const [sandboxError, setSandboxError] = useState<string>('');
-  const [sandboxCopied, setSandboxCopied] = useState(false);
+  // Active Tab: Users or Muse AI Engine
+  const [activeAdminTab, setActiveAdminTab] = useState<'users' | 'muse'>('users');
+  const [museStatus, setMuseStatus] = useState<MuseEngineStatus | null>(null);
 
   // Close filter dropdowns when clicking outside
   useEffect(() => {
@@ -286,109 +255,9 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       fetchUsers();
-      fetchApifyConfigFromFirestore().then((cfg) => {
-        if (cfg) {
-          if (cfg.token) setApifyToken(cfg.token);
-          if (cfg.user) setApifyUser(cfg.user);
-          if (typeof cfg.autoScrape === 'boolean') setApifyAutoScrape(cfg.autoScrape);
-          if (cfg.targetPlatforms) setApifyPlatforms(cfg.targetPlatforms);
-          if (cfg.maxKeywords) setApifyMaxKeywords(cfg.maxKeywords);
-        }
-      }).catch(() => {});
+      fetchMuseStatus(true).then((st) => setMuseStatus(st)).catch(() => {});
     }
   }, [isOpen]);
-
-  const handleTestApify = async () => {
-    if (!apifyToken.trim()) {
-      setApifyTestResult('error');
-      setApifyStatusMessage('Please enter an Apify API token first.');
-      return;
-    }
-    setIsApifyTesting(true);
-    setApifyTestResult('idle');
-    setApifyStatusMessage('');
-    try {
-      const res = await validateApifyToken(apifyToken.trim());
-      if (res.success && res.user) {
-        setApifyTestResult('success');
-        setApifyUser(res.user);
-        setApifyStatusMessage(`Connected as @${res.user.username} (${res.user.plan || 'Active'})`);
-      } else {
-        setApifyTestResult('error');
-        setApifyStatusMessage(res.error || 'Token validation failed. Please check credentials.');
-      }
-    } catch (err: any) {
-      setApifyTestResult('error');
-      setApifyStatusMessage(err?.message || 'Error communicating with Apify API.');
-    } finally {
-      setIsApifyTesting(false);
-    }
-  };
-
-  const handleSaveApify = async () => {
-    setIsApifySaving(true);
-    try {
-      const ok = await saveApifyConfigToFirestore({
-        token: apifyToken.trim(),
-        autoScrape: apifyAutoScrape,
-        user: apifyUser,
-        targetPlatforms: apifyPlatforms,
-        maxKeywords: apifyMaxKeywords,
-        adminEmail: currentAdminEmail
-      });
-      if (ok) {
-        setIsApifySavedRecently(true);
-        setNotification({ type: 'success', message: 'Apify API credentials and scraper settings saved successfully!' });
-        setTimeout(() => setIsApifySavedRecently(false), 3000);
-      } else {
-        setNotification({ type: 'error', message: 'Failed to save Apify settings to Firestore.' });
-      }
-    } catch (e: any) {
-      setNotification({ type: 'error', message: e?.message || 'Error saving settings' });
-    } finally {
-      setIsApifySaving(false);
-    }
-  };
-
-  const handlePasteApifyToken = async () => {
-    try {
-      if (navigator.clipboard) {
-        const text = await navigator.clipboard.readText();
-        if (text) {
-          setApifyToken(text.trim());
-          setApifyTestResult('idle');
-          setApifyStatusMessage('');
-        }
-      }
-    } catch {}
-  };
-
-  const handleClearApify = () => {
-    setApifyToken('');
-    setApifyUser(null);
-    setApifyTestResult('idle');
-    setApifyStatusMessage('');
-  };
-
-  const handleRunSandboxScrape = async () => {
-    if (!sandboxQuery.trim()) return;
-    setIsSandboxRunning(true);
-    setSandboxError('');
-    try {
-      const res = await testApifyScrapeSandbox(sandboxQuery.trim(), apifyToken.trim(), apifyMaxKeywords);
-      if (res.success) {
-        setSandboxTags(res.tags);
-        setSandboxSource(res.source);
-        setSandboxLatency(res.latencyMs);
-      } else {
-        setSandboxError(res.error || 'Failed to retrieve tags');
-      }
-    } catch (e: any) {
-      setSandboxError(e?.message || 'Scrape request failed');
-    } finally {
-      setIsSandboxRunning(false);
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -662,24 +531,25 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
 
           <button
             type="button"
-            onClick={() => setActiveAdminTab('apify')}
+            onClick={() => setActiveAdminTab('muse')}
             className={cn(
-              "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer",
-              activeAdminTab === 'apify'
-                ? "bg-[#00A699] text-white shadow-xs"
+              "flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer whitespace-nowrap shrink-0",
+              activeAdminTab === 'muse'
+                ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-900 shadow-xs"
                 : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-white/5"
             )}
           >
-            <Bot size={14} />
-            <span>Apify API Integration</span>
+            <Sparkles size={14} />
+            <span>Muse AI</span>
             <span className={cn(
-              "px-2 py-0.5 rounded-full text-[10px] font-semibold flex items-center gap-1",
-              Boolean(apifyToken.trim())
-                ? "bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30"
-                : "bg-zinc-200 dark:bg-zinc-800 text-zinc-500"
+              "text-[11px] font-medium",
+              activeAdminTab === 'muse'
+                ? "text-white/75 dark:text-zinc-600"
+                : museStatus?.enabled && museStatus?.connected
+                  ? "text-emerald-700 dark:text-emerald-400"
+                  : "text-zinc-400 dark:text-zinc-500"
             )}>
-              <span className={cn("w-1.5 h-1.5 rounded-full", Boolean(apifyToken.trim()) ? "bg-emerald-500 animate-pulse" : "bg-zinc-400")} />
-              {Boolean(apifyToken.trim()) ? (apifyUser ? `@${apifyUser.username}` : "Configured") : "Not Set"}
+              · {museStatus?.enabled && museStatus?.connected ? 'Connected' : 'Sign In'}
             </span>
           </button>
         </div>
@@ -1071,443 +941,13 @@ export const AdminUsersModal: React.FC<AdminUsersModalProps> = ({
       </>
     )}
 
-    {/* Tab 2: Apify API Integration Panel */}
-    {activeAdminTab === 'apify' && (
-      <div className="flex-1 overflow-y-auto pr-1 pb-4 space-y-6 text-zinc-900 dark:text-zinc-100">
-        {/* Top Overview & Status Card */}
-        <div className="p-5 rounded-2xl bg-gradient-to-r from-[#00A699]/15 via-emerald-500/10 to-teal-500/10 border border-[#00A699]/30 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
-          <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-[#00A699] text-white flex items-center justify-center font-bold shadow-md shrink-0">
-              <Bot size={24} />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-zinc-900 dark:text-white">
-                  Apify API Integration & Stock Scraper
-                </h3>
-                <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30 uppercase tracking-wide">
-                  Live Stock Engine
-                </span>
-              </div>
-              <p className="text-xs text-zinc-600 dark:text-zinc-300 mt-0.5 max-w-xl">
-                Configure your personal or organization Apify API token. It powers automatic microstock competitor keyword scraping across Adobe Stock, Shutterstock, and Freepik, and persists securely in Firestore.
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 bg-white/60 dark:bg-black/30 px-4 py-2.5 rounded-2xl border border-zinc-200 dark:border-white/10">
-            <div className="text-right">
-              <div className="text-[10px] uppercase font-bold text-zinc-500 dark:text-zinc-400 tracking-wider">
-                Connection Status
-              </div>
-              <div className="text-xs font-bold flex items-center justify-end gap-1.5 mt-0.5">
-                <span className={cn(
-                  "w-2 h-2 rounded-full",
-                  Boolean(apifyToken.trim()) ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse" : "bg-zinc-400"
-                )} />
-                <span className={Boolean(apifyToken.trim()) ? "text-emerald-600 dark:text-emerald-400" : "text-zinc-500"}>
-                  {Boolean(apifyToken.trim()) ? (apifyUser ? `@${apifyUser.username}` : "Token Saved") : "Not Configured"}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* 2-Column Grid: Left: Credentials & Auth, Right: Scraper & Automation Settings */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-          {/* Card 1: API Token & Cloud Sync */}
-          <div className="bg-white dark:bg-[#1A202E] border border-zinc-200 dark:border-white/10 rounded-2xl p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-zinc-200/80 dark:border-white/10">
-              <div className="flex items-center gap-2">
-                <Key size={16} className="text-[#00A699]" />
-                <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
-                  Apify API Credentials
-                </h4>
-              </div>
-              <a
-                href="https://console.apify.com/account/integrations"
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
-              >
-                Get API Token <ExternalLink size={12} />
-              </a>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between">
-                <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                  Apify API Token
-                </label>
-                <span className="text-[10px] text-zinc-400 font-mono">Secret Key</span>
-              </div>
-              <div className="relative flex items-center">
-                <input
-                  type={showApifyToken ? "text" : "password"}
-                  value={apifyToken}
-                  onChange={(e) => {
-                    setApifyToken(e.target.value);
-                    setApifyTestResult('idle');
-                    setApifyStatusMessage('');
-                  }}
-                  placeholder="apify_api_..."
-                  className="w-full pl-3 pr-24 py-2.5 text-xs font-mono rounded-xl border border-zinc-300 dark:border-white/10 bg-zinc-50 dark:bg-black/30 text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-hidden focus:ring-2 focus:ring-[#00A699]/30"
-                />
-
-                <div className="absolute right-2 flex items-center gap-1 text-zinc-400">
-                  <button
-                    type="button"
-                    onClick={() => setShowApifyToken(!showApifyToken)}
-                    title={showApifyToken ? "Hide Token" : "Show Token"}
-                    className="p-1 hover:text-zinc-700 dark:hover:text-zinc-200 rounded cursor-pointer"
-                  >
-                    {showApifyToken ? <EyeOff size={15} /> : <Eye size={15} />}
-                  </button>
-                  {!apifyToken && (
-                    <button
-                      type="button"
-                      onClick={handlePasteApifyToken}
-                      title="Paste from clipboard"
-                      className="p-1 hover:text-zinc-700 dark:hover:text-zinc-200 rounded cursor-pointer"
-                    >
-                      <Copy size={15} />
-                    </button>
-                  )}
-                  {apifyToken && (
-                    <button
-                      type="button"
-                      onClick={handleClearApify}
-                      title="Clear Token"
-                      className="p-1 hover:text-red-500 rounded cursor-pointer"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  )}
-                </div>
-              </div>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                Stored persistently in Firestore (system_config/apify) so it synchronizes across all sessions.
-              </p>
-            </div>
-
-            {/* Validation Message Banner */}
-            {apifyStatusMessage && (
-              <div className={cn(
-                "p-3 rounded-xl text-xs flex items-start gap-2 animate-in fade-in duration-200 border",
-                apifyTestResult === 'success'
-                  ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800/40 text-emerald-800 dark:text-emerald-300"
-                  : "bg-red-50 dark:bg-red-950/40 border-red-300 dark:border-red-800/40 text-red-800 dark:text-red-300"
-              )}>
-                {apifyTestResult === 'success' ? (
-                  <CheckCircle2 size={16} className="text-emerald-600 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
-                )}
-                <span className="font-medium">{apifyStatusMessage}</span>
-              </div>
-            )}
-
-            {/* Connected User Card */}
-            {apifyUser && (
-              <div className="p-3 bg-zinc-50 dark:bg-black/20 rounded-xl border border-zinc-200 dark:border-white/5 space-y-1.5 text-xs">
-                <div className="flex justify-between items-center">
-                  <span className="text-zinc-500">Connected User:</span>
-                  <strong className="text-zinc-900 dark:text-white">@{apifyUser.username}</strong>
-                </div>
-                {apifyUser.email && (
-                  <div className="flex justify-between items-center">
-                    <span className="text-zinc-500">Account Email:</span>
-                    <span className="font-mono text-[11px] text-zinc-700 dark:text-zinc-300">{apifyUser.email}</span>
-                  </div>
-                )}
-                <div className="flex justify-between items-center">
-                  <span className="text-zinc-500">Plan Tier:</span>
-                  <span className="font-semibold text-emerald-600 dark:text-emerald-400">{apifyUser.plan || 'Active'}</span>
-                </div>
-              </div>
-            )}
-
-            {/* Actions: Save & Test */}
-            <div className="flex items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={handleSaveApify}
-                disabled={isApifySaving}
-                className={cn(
-                  "flex-1 py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs",
-                  isApifySavedRecently
-                    ? "bg-emerald-600 text-white"
-                    : "bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-100 text-white dark:text-zinc-900 active:scale-98"
-                )}
-              >
-                {isApifySaving ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Saving...</span>
-                  </>
-                ) : isApifySavedRecently ? (
-                  <>
-                    <Check size={14} strokeWidth={2.5} />
-                    <span>Saved to Database!</span>
-                  </>
-                ) : (
-                  <>
-                    <Database size={14} />
-                    <span>Save Apify Configuration</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                disabled={isApifyTesting || !apifyToken.trim()}
-                onClick={handleTestApify}
-                className={cn(
-                  "py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
-                  !apifyToken.trim()
-                    ? "opacity-50 cursor-not-allowed border-zinc-200 dark:border-white/5 text-zinc-400"
-                    : "bg-white dark:bg-white/5 border-zinc-300 dark:border-white/10 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/10 active:scale-98"
-                )}
-              >
-                {isApifyTesting ? (
-                  <>
-                    <Loader2 size={14} className="animate-spin" />
-                    <span>Validating...</span>
-                  </>
-                ) : (
-                  <>
-                    <ShieldCheck size={14} />
-                    <span>Test Connection</span>
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-
-          {/* Card 2: Scraper & Automation Settings */}
-          <div className="bg-white dark:bg-[#1A202E] border border-zinc-200 dark:border-white/10 rounded-2xl p-5 shadow-xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-zinc-200/80 dark:border-white/10">
-              <div className="flex items-center gap-2">
-                <Sliders size={16} className="text-[#00A699]" />
-                <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
-                  Scraping & Stock Extraction Settings
-                </h4>
-              </div>
-              <span className="text-[10px] text-zinc-400 font-mono">
-                Actor: apify/web-scraper
-              </span>
-            </div>
-
-            {/* Auto Scrape Switch */}
-            <div className="flex items-center justify-between p-3.5 bg-zinc-50 dark:bg-black/20 rounded-xl border border-zinc-200/80 dark:border-white/5">
-              <div className="space-y-0.5">
-                <span className="text-xs font-bold text-zinc-900 dark:text-white block">
-                  Auto-Enrich Stock Metadata
-                </span>
-                <span className="text-[11px] text-zinc-500 dark:text-zinc-400 block">
-                  Automatically query competitor stock keywords during batch processing
-                </span>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={apifyAutoScrape}
-                onClick={() => {
-                  const next = !apifyAutoScrape;
-                  setApifyAutoScrape(next);
-                  setApifyAutoScrapeEnabled(next);
-                }}
-                className={cn(
-                  "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out",
-                  apifyAutoScrape ? "bg-[#00A699]" : "bg-zinc-300 dark:bg-zinc-700"
-                )}
-              >
-                <span
-                  className={cn(
-                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-xs ring-0 transition duration-200 ease-in-out",
-                    apifyAutoScrape ? "translate-x-5" : "translate-x-0"
-                  )}
-                />
-              </button>
-            </div>
-
-            {/* Target Platforms */}
-            <div className="space-y-2">
-              <label className="block text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                Target Competitor Stock Markets
-              </label>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {[
-                  { id: 'adobe', label: 'Adobe Stock' },
-                  { id: 'shutterstock', label: 'Shutterstock' },
-                  { id: 'freepik', label: 'Freepik' },
-                  { id: 'getty', label: 'Getty / iStock' }
-                ].map((p) => {
-                  const isSel = apifyPlatforms.includes(p.id);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => {
-                        if (isSel) {
-                          if (apifyPlatforms.length > 1) {
-                            setApifyPlatforms(apifyPlatforms.filter(x => x !== p.id));
-                          }
-                        } else {
-                          setApifyPlatforms([...apifyPlatforms, p.id]);
-                        }
-                      }}
-                      className={cn(
-                        "py-2 px-2.5 rounded-xl text-xs font-semibold border text-center transition-all cursor-pointer",
-                        isSel
-                          ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
-                          : "bg-zinc-50 dark:bg-black/20 border-zinc-200 dark:border-white/5 text-zinc-500"
-                      )}
-                    >
-                      {p.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Keyword Target Slider */}
-            <div className="space-y-2 pt-1">
-              <div className="flex justify-between items-center">
-                <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                  Scraped Keywords Target Density
-                </label>
-                <span className="font-mono text-xs font-bold px-2 py-0.5 rounded bg-zinc-100 dark:bg-white/10 text-zinc-900 dark:text-white">
-                  {apifyMaxKeywords} keywords
-                </span>
-              </div>
-              <input
-                type="range"
-                min="30"
-                max="50"
-                value={apifyMaxKeywords}
-                onChange={(e) => setApifyMaxKeywords(parseInt(e.target.value))}
-                className="w-full accent-[#00A699] h-1.5 bg-zinc-200 dark:bg-black/50 rounded-full appearance-none cursor-pointer"
-              />
-              <div className="flex justify-between text-[10px] text-zinc-400 font-mono">
-                <span>30 keywords</span>
-                <span>40 keywords</span>
-                <span>50 keywords (Recommended)</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Section 3: Interactive Live Scraper Sandbox */}
-        <div className="bg-white dark:bg-[#1A202E] border border-zinc-200 dark:border-white/10 rounded-2xl p-5 shadow-xs space-y-4">
-          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-zinc-200/80 dark:border-white/10">
-            <div className="flex items-center gap-2">
-              <Play size={16} className="text-[#00A699]" />
-              <h4 className="text-sm font-bold text-zinc-900 dark:text-white">
-                Live Scraper Test Sandbox
-              </h4>
-              <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-white/5 px-2 py-0.5 rounded font-mono">
-                Admin Diagnostic
-              </span>
-            </div>
-            {sandboxTags.length > 0 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-500">
-                  Extracted <strong className="text-zinc-900 dark:text-white">{sandboxTags.length}</strong> keywords
-                </span>
-                {sandboxLatency !== null && (
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                    {sandboxLatency}ms
-                  </span>
-                )}
-                <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                  Source: {sandboxSource}
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-            <div className="relative flex-1">
-              <Search size={15} className="absolute left-3.5 top-3 text-zinc-400" />
-              <input
-                type="text"
-                value={sandboxQuery}
-                onChange={(e) => setSandboxQuery(e.target.value)}
-                placeholder="Enter stock subject (e.g. ramadan kareem golden crescent, 3d business character)"
-                className="w-full pl-9 pr-3 py-2.5 text-xs rounded-xl border border-zinc-300 dark:border-white/10 bg-zinc-50 dark:bg-black/30 text-zinc-900 dark:text-white placeholder:text-zinc-400 focus:outline-hidden focus:ring-2 focus:ring-[#00A699]/30"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleRunSandboxScrape();
-                }}
-              />
-            </div>
-
-            <button
-              type="button"
-              disabled={isSandboxRunning || !sandboxQuery.trim()}
-              onClick={handleRunSandboxScrape}
-              className={cn(
-                "px-5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer shadow-xs whitespace-nowrap",
-                isSandboxRunning
-                  ? "bg-zinc-200 dark:bg-zinc-800 text-zinc-400 cursor-not-allowed"
-                  : "bg-[#00A699] hover:bg-[#009085] text-white active:scale-98"
-              )}
-            >
-              {isSandboxRunning ? (
-                <>
-                  <Loader2 size={14} className="animate-spin" />
-                  <span>Scraping...</span>
-                </>
-              ) : (
-                <>
-                  <Play size={14} />
-                  <span>Test Scrape Now</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          {sandboxError && (
-            <div className="p-3 bg-red-50 dark:bg-red-950/40 border border-red-300 dark:border-red-800/40 rounded-xl text-xs text-red-700 dark:text-red-300 flex items-center gap-2">
-              <AlertCircle size={15} className="shrink-0" />
-              <span>{sandboxError}</span>
-            </div>
-          )}
-
-          {sandboxTags.length > 0 && (
-            <div className="space-y-3 pt-1">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                  Extracted Microstock Keywords ({sandboxTags.length}):
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(sandboxTags.join(', '));
-                    setSandboxCopied(true);
-                    setTimeout(() => setSandboxCopied(false), 2000);
-                  }}
-                  className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  {sandboxCopied ? <Check size={13} /> : <Copy size={13} />}
-                  <span>{sandboxCopied ? 'Copied All!' : 'Copy All Keywords'}</span>
-                </button>
-              </div>
-
-              <div className="p-3 bg-zinc-50 dark:bg-black/30 rounded-xl border border-zinc-200 dark:border-white/5 flex flex-wrap gap-1.5 max-h-48 overflow-y-auto">
-                {sandboxTags.map((tag, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center px-2.5 py-1 rounded-lg text-[11px] font-medium bg-white dark:bg-white/10 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-white/10 shadow-2xs"
-                  >
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+    {/* Tab 2: Muse AI Account & Primary Execution Engine */}
+    {activeAdminTab === 'muse' && (
+      <MuseAiAdminPanel
+        currentAdminEmail={currentAdminEmail}
+        onStatusChange={(st) => setMuseStatus(st)}
+        onNotify={(notice) => setNotification(notice)}
+      />
     )}
 
         {/* Modal 1: Add New Member Modal */}

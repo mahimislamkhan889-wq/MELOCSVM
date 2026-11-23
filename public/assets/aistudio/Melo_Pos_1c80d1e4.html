@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>Melo Pos</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Segoe UI',system-ui,sans-serif;background:#14161a;color:#eee;display:flex;min-height:100vh;}
+#sb{width:320px;min-width:320px;background:#1c1e24;padding:14px;overflow-y:auto;max-height:100vh;border-right:1px solid #2a2d35;}
+#main{flex:1;display:flex;flex-direction:column;align-items:center;padding:20px;gap:12px;overflow:auto;background:#12141a;}
+h1{font-size:15px;font-weight:800;color:#fff;margin-bottom:2px;letter-spacing:1px;}
+.sub{font-size:11px;color:#666;margin-bottom:14px;}
+.grp{border:1px solid #2a2d35;border-radius:8px;padding:10px 12px 12px;margin-bottom:10px;background:#1a1c22;}
+.grp h3{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#7fb2ff;margin:0 0 8px;}
+label{display:flex;justify-content:space-between;align-items:center;font-size:12px;margin:6px 0 2px;color:#bbb;}
+.val{color:#8fd0ff;min-width:32px;text-align:right;font-size:11px;}
+input[type=range]{width:58%;accent-color:#5b8def;}
+select,input[type=color],input[type=number],input[type=text]{background:#13151a;color:#eee;border:1px solid #333;border-radius:5px;padding:4px 7px;font-size:12px;}
+select,input[type=text],input[type=number]{width:100%;}
+input[type=color]{width:38px;height:24px;padding:2px;cursor:pointer;}
+.row{display:flex;align-items:center;gap:7px;margin:5px 0;}
+.row label{margin:0;flex:1;}
+.ck{display:flex;align-items:center;gap:7px;margin:6px 0;font-size:12px;color:#bbb;}
+.ck input{accent-color:#5b8def;}
+button{width:100%;padding:9px;border:none;border-radius:7px;font-size:12px;cursor:pointer;font-weight:700;font-family:inherit;margin-top:4px;}
+#rndBtn{background:linear-gradient(135deg,#5b8def,#a855f7);color:#fff;}
+#rndBtn:hover{opacity:.9;}
+.dl-row{display:flex;gap:6px;margin-top:6px;}
+.dl-row button{background:#2c2f38;color:#eee;}
+.dl-row button:hover{background:#383c47;}
+canvas{background:#fff;max-width:100%;border-radius:4px;box-shadow:0 8px 32px rgba(0,0,0,.5);}
+.pgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:5px;margin-top:6px;}
+.psw{height:26px;border-radius:4px;cursor:pointer;border:2px solid transparent;}
+.psw.on{border-color:#5b8def;}
+.hint{font-size:10px;color:#555;line-height:1.5;margin-top:3px;}
+#note{font-size:11px;color:#555;}
+</style>
+</head>
+<body>
+<div id="sb">
+  <h1 style="display:flex;align-items:center;gap:8px"><img src="data:image/jpeg;base64,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" alt="Melo logo" style="width:32px;height:32px;border-radius:9px;flex:none">Melo Pos</h1>
+  <div class="sub">Spheres · Arcs · Lines · Geometric — exact stock poster style</div>
+  <button id="rndBtn">🎲 New Random Set</button>
+
+  <div class="grp">
+    <h3>Layout</h3>
+    <label>Posters in set<select id="cnt"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5" selected>5</option><option value="6">6</option></select></label>
+    <label>Poster size<select id="sz"><option value="300x420" selected>Portrait 300×420</option><option value="260x420">Tall 260×420</option><option value="340x340">Square 340×340</option><option value="420x300">Landscape 420×300</option><option value="260x340">Compact</option></select></label>
+    <label>Gap <span class="val" id="gV">10</span></label>
+    <input type="range" id="gap" min="0" max="40" value="10">
+  </div>
+
+  <div class="grp">
+    <h3>Pattern Type</h3>
+    <label>Pattern<select id="pat">
+      <option value="mix" selected>Mix (auto per poster)</option>
+      <optgroup label="── Gradient Shapes ──">
+      <option value="sphere">Sphere / Globe</option>
+      <option value="half_sphere">Half Sphere (bottom)</option>
+      <option value="multi_sphere">Multi Spheres</option>
+      <option value="gradient_bg">Pure Gradient Background</option>
+      <option value="gradient_orbs">Floating Orbs</option>
+      </optgroup>
+      <optgroup label="── Line Art ──">
+      <option value="wavy">Wavy Flow Lines</option>
+      <option value="straight">Straight Parallel Lines</option>
+      <option value="concentric_arc">Concentric Arcs (corner)</option>
+      <option value="concentric_center">Concentric Rings (center)</option>
+      <option value="diagonal_bands">Diagonal Stripe Bands</option>
+      <option value="barcode">Barcode Bands</option>
+      <option value="tapered_lines">Tapered Line Fan</option>
+      </optgroup>
+      <optgroup label="── Geometric ──">
+      <option value="bold_stripe">Bold Gradient Stripes</option>
+      <option value="chevron">Diamond/Chevron Rings</option>
+      <option value="crosshatch">Crosshatch Grid</option>
+      <option value="dot_grid">Dot Grid</option>
+      <option value="half_circle_lines">Half Circle + Lines</option>
+      <option value="column_lines">Column Lines (vertical)</option>
+      </optgroup>
+    </select></label>
+    <label>Corner/Origin<select id="corner">
+      <option value="random" selected>Random</option>
+      <option value="topLeft">Top Left</option><option value="topRight">Top Right</option>
+      <option value="bottomLeft">Bottom Left</option><option value="bottomRight">Bottom Right</option>
+      <option value="center">Center</option><option value="edgeBottom">Bottom Edge</option>
+    </select></label>
+    <label>Angle <span class="val" id="angV">90°</span></label>
+    <input type="range" id="ang" min="0" max="180" value="90">
+    <label>Line spacing <span class="val" id="spV">8</span></label>
+    <input type="range" id="sp" min="2" max="30" value="8">
+    <label>Line width <span class="val" id="lwV">2</span></label>
+    <input type="range" id="lw" min="0.5" max="10" value="2" step="0.5">
+    <label>Wave amplitude <span class="val" id="waV">26</span></label>
+    <input type="range" id="wa" min="0" max="100" value="26">
+    <label>Wave frequency <span class="val" id="wfV">4</span></label>
+    <input type="range" id="wf" min="1" max="14" value="4" step="0.5">
+    <label>Sphere size % <span class="val" id="ssV">72</span></label>
+    <input type="range" id="ss" min="20" max="130" value="72">
+    <label>Sphere detail <span class="val" id="sdV">18</span></label>
+    <input type="range" id="sd" min="4" max="40" value="18">
+  </div>
+
+  <div class="grp">
+    <h3>Gradient / Colour</h3>
+    <label>Colour mode<select id="cm">
+      <option value="gradient" selected>Gradient palettes (per poster)</option>
+      <option value="mono">Monochrome + solid</option>
+      <option value="duo">Duotone custom</option>
+    </select></label>
+    <div id="palWrap">
+      <div class="hint">Click to toggle palettes in rotation:</div>
+      <div class="pgrid" id="pgrid"></div>
+    </div>
+    <div id="mWrap" style="display:none">
+      <div class="row"><label>Background</label><input type="color" id="bgC" value="#f5f0e8"></div>
+      <div class="row"><label>Ink / lines</label><input type="color" id="inkC" value="#1a1008"></div>
+      <div class="row"><label>Accent</label><input type="color" id="accC" value="#e07040"></div>
+    </div>
+    <label style="margin-top:8px;">Gradient smoothness <span class="val" id="gsV">12</span></label>
+    <input type="range" id="gs" min="2" max="32" value="12">
+    <label>Color intensity <span class="val" id="ciV">0.85</span></label>
+    <input type="range" id="ci" min="0.2" max="1" value="0.85" step="0.05">
+  </div>
+
+  <div class="grp">
+    <h3>Text / Chrome</h3>
+    <div class="ck"><input type="checkbox" id="showTxt" checked><span>Show title / number / meta</span></div>
+    <label style="margin-top:5px;">Title words (comma separated)</label>
+    <input type="text" id="words" value="INSPIRATION, CREATIVE, MODERN ART, ABSTRACT, COVER DESIGN, GRADIENT">
+    <label>Main tagline</label>
+    <input type="text" id="tag" value="DESIGN">
+    <label>Meta line</label>
+    <input type="text" id="meta" value="MODERN ART">
+    <label>Number start<input type="number" id="artN" value="1" min="0" max="999" style="width:55px"></label>
+    <label>Text color mode<select id="tcm">
+      <option value="auto" selected>Auto (contrast)</option>
+      <option value="dark">Always dark</option>
+      <option value="light">Always light</option>
+    </select></label>
+  </div>
+
+  <div class="grp">
+    <h3>Export</h3>
+    <div class="dl-row">
+      <button id="dlPng">⬇ PNG</button>
+      <button id="dlSvg">⬇ SVG</button>
+    </div>
+  </div>
+</div>
+
+<div id="main">
+  <div id="note"></div>
+  <canvas id="cv"></canvas>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+// ── GRADIENT PALETTES ──────────────────────────────────────────
+const PALS = [
+  // Warm orange/pink/yellow (image 1 style)
+  {bg:'#fef3e8', c1:'#f97316', c2:'#ec4899', c3:'#fbbf24', c4:'#f43f5e', ink:'#1a0808'},
+  {bg:'#fff1f0', c1:'#ef4444', c2:'#f97316', c3:'#fbbf24', c4:'#ec4899', ink:'#1a0808'},
+  {bg:'#fdf4ff', c1:'#a855f7', c2:'#ec4899', c3:'#f97316', c4:'#8b5cf6', ink:'#0f0018'},
+  // Blue/purple/lavender (image 3 style)
+  {bg:'#f0f0ff', c1:'#6366f1', c2:'#a78bfa', c3:'#818cf8', c4:'#c084fc', ink:'#0a001a'},
+  {bg:'#ffe9f0', c1:'#f472b6', c2:'#a78bfa', c3:'#818cf8', c4:'#fbbf24', ink:'#0a001a'},
+  {bg:'#eef0ff', c1:'#818cf8', c2:'#c084fc', c3:'#f9a8d4', c4:'#fbbf24', ink:'#08081a'},
+  // Blue/orange (image 2 style)
+  {bg:'#fff8f0', c1:'#fb923c', c2:'#60a5fa', c3:'#a78bfa', c4:'#f9a8d4', ink:'#0a0808'},
+  {bg:'#f0f9ff', c1:'#38bdf8', c2:'#fb923c', c3:'#a855f7', c4:'#34d399', ink:'#080818'},
+  // White clean
+  {bg:'#ffffff', c1:'#6366f1', c2:'#ec4899', c3:'#f97316', c4:'#06b6d4', ink:'#111827'},
+  {bg:'#0f0f1a', c1:'#a855f7', c2:'#ec4899', c3:'#3b82f6', c4:'#06b6d4', ink:'#f5f3ff'},
+];
+
+let actPals = [...PALS];
+
+function mulb(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+let designSeed=Date.now()&0xffffffff;
+let rng = mulb(designSeed);
+function rand(){return rng();}
+function rr(a,b){return a+rand()*(b-a);}
+function ch(arr){return arr[Math.floor(rand()*arr.length)];}
+
+// ── GRADIENT HELPERS ─────────────────────────────────────────
+function mkGrad(ctx,x1,y1,x2,y2,c1,c2,alpha){
+  const g=ctx.createLinearGradient(x1,y1,x2,y2);
+  g.addColorStop(0,c1);g.addColorStop(1,c2);return g;
+}
+function mkRadial(ctx,cx,cy,r,c1,c2){
+  const g=ctx.createRadialGradient(cx,cy,r*0.02,cx,cy,r);
+  g.addColorStop(0,c1);g.addColorStop(1,c2);return g;
+}
+function hexA(hex,a){const r=parseInt(hex.slice(1,3),16),g2=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);return `rgba(${r},${g2},${b},${a})`;}
+function lum(hex){const c=hex.replace('#','');const r=parseInt(c.substr(0,2),16),g2=parseInt(c.substr(2,2),16),b=parseInt(c.substr(4,2),16);return(0.299*r+0.587*g2+0.114*b)/255;}
+function contrast(hex){return lum(hex)>0.55?'#1a1008':'#f5f0ff';}
+
+function getTextColor(){
+  const mode=$('tcm').value;
+  return mode;
+}
+
+// Corner point
+function cpt(corner,w,h){
+  if(corner==='topLeft') return{x:0,y:0};
+  if(corner==='topRight') return{x:w,y:0};
+  if(corner==='bottomLeft') return{x:0,y:h};
+  if(corner==='bottomRight') return{x:w,y:h};
+  if(corner==='edgeBottom') return{x:w/2,y:h*1.05};
+  return{x:w/2,y:h/2};
+}
+
+// ── PATTERN GENERATORS ────────────────────────────────────────
+function genSphere(ctx,w,h,pal,cfg){
+  const sz=w*cfg.ss*0.01;
+  const cx=w/2, cy=h*0.42;
+  // Sphere body with radial gradient
+  const rg=ctx.createRadialGradient(cx-sz*0.25,cy-sz*0.25,sz*0.04,cx,cy,sz);
+  rg.addColorStop(0,pal.c1);
+  rg.addColorStop(0.45,pal.c2);
+  rg.addColorStop(1,hexA(pal.c3,0.6));
+  ctx.beginPath();ctx.arc(cx,cy,sz,0,Math.PI*2);
+  ctx.fillStyle=rg;ctx.fill();
+  // Latitude lines
+  const lines=cfg.sd;
+  for(let i=1;i<lines;i++){
+    const lat=(i/lines-0.5)*Math.PI;
+    const ry=Math.cos(lat)*sz;
+    const lineY=cy+Math.sin(lat)*sz;
+    const alpha=0.25+0.2*Math.abs(Math.sin(lat));
+    ctx.beginPath();ctx.ellipse(cx,lineY,ry,ry*0.22,0,0,Math.PI*2);
+    ctx.strokeStyle=hexA('#ffffff',alpha);ctx.lineWidth=cfg.lw*0.6;ctx.stroke();
+  }
+  // Longitude curves
+  for(let i=0;i<cfg.sd;i++){
+    const ang=i/cfg.sd*Math.PI;
+    const rx=Math.abs(Math.sin(ang))*sz;
+    ctx.beginPath();ctx.ellipse(cx,cy,rx,sz,0,0,Math.PI*2);
+    ctx.strokeStyle=hexA('#ffffff',0.15);ctx.lineWidth=cfg.lw*0.4;ctx.stroke();
+  }
+  // Highlight
+  const hg=ctx.createRadialGradient(cx-sz*0.3,cy-sz*0.3,0,cx-sz*0.1,cy-sz*0.1,sz*0.55);
+  hg.addColorStop(0,'rgba(255,255,255,0.45)');hg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.beginPath();ctx.arc(cx,cy,sz,0,Math.PI*2);ctx.fillStyle=hg;ctx.fill();
+}
+
+function genHalfSphere(ctx,w,h,pal,cfg){
+  const sz=w*cfg.ss*0.012;
+  const cx=w/2, cy=h*0.82;
+  ctx.save();ctx.beginPath();ctx.rect(0,0,w,h);ctx.clip();
+  const rg=ctx.createRadialGradient(cx-sz*0.2,cy-sz*0.3,sz*0.04,cx,cy,sz);
+  rg.addColorStop(0,pal.c1);rg.addColorStop(0.5,pal.c2);rg.addColorStop(1,hexA(pal.c3,0.5));
+  ctx.beginPath();ctx.arc(cx,cy,sz,Math.PI,0);ctx.closePath();
+  ctx.fillStyle=rg;ctx.fill();
+  const lines=cfg.sd;
+  for(let i=1;i<lines;i++){
+    const lat=i/lines;
+    const ry=sz*lat;
+    const lineY=cy-Math.sqrt(sz*sz-ry*ry);
+    if(lineY>0){
+      ctx.beginPath();ctx.ellipse(cx,lineY+(cy-lineY)*0.5,ry,ry*0.18,0,0,Math.PI*2);
+      ctx.strokeStyle=hexA('#ffffff',0.3);ctx.lineWidth=cfg.lw*0.5;ctx.stroke();
+    }
+  }
+  const hg=ctx.createRadialGradient(cx-sz*0.3,cy-sz*0.4,0,cx,cy-sz*0.2,sz*0.6);
+  hg.addColorStop(0,'rgba(255,255,255,0.4)');hg.addColorStop(1,'rgba(255,255,255,0)');
+  ctx.beginPath();ctx.arc(cx,cy,sz,Math.PI,0);ctx.closePath();
+  ctx.fillStyle=hg;ctx.fill();
+  ctx.restore();
+}
+
+function genMultiSphere(ctx,w,h,pal,cfg){
+  const positions=[[0.5,0.28,0.9],[0.25,0.58,0.62],[0.72,0.62,0.55],[0.5,0.8,0.38],[0.12,0.25,0.28],[0.88,0.3,0.32]];
+  const cols=[[pal.c1,pal.c2],[pal.c2,pal.c3],[pal.c1,pal.c4],[pal.c3,pal.c2],[pal.c4,pal.c1],[pal.c2,pal.c4]];
+  positions.slice(0,Math.floor(2+cfg.ss/28)).forEach(([fx,fy,fs],i)=>{
+    const sz=w*fs*0.48;const cx=w*fx,cy=h*fy;
+    const [ca,cb]=cols[i%cols.length];
+    const rg=ctx.createRadialGradient(cx-sz*0.22,cy-sz*0.22,sz*0.02,cx,cy,sz);
+    rg.addColorStop(0,ca);rg.addColorStop(1,hexA(cb,0.6));
+    ctx.beginPath();ctx.arc(cx,cy,sz,0,Math.PI*2);ctx.fillStyle=rg;ctx.fill();
+    // Lines on sphere
+    for(let li=1;li<cfg.sd*0.5;li++){
+      const lat=(li/cfg.sd-0.5)*Math.PI*1.5;
+      const ry2=Math.cos(lat)*sz;const lineY2=cy+Math.sin(lat)*sz;
+      ctx.beginPath();ctx.ellipse(cx,lineY2,ry2,ry2*0.2,0,0,Math.PI*2);
+      ctx.strokeStyle=hexA('#ffffff',0.2);ctx.lineWidth=cfg.lw*0.4;ctx.stroke();
+    }
+    const hg=ctx.createRadialGradient(cx-sz*0.28,cy-sz*0.28,0,cx,cy,sz*0.65);
+    hg.addColorStop(0,'rgba(255,255,255,0.4)');hg.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.beginPath();ctx.arc(cx,cy,sz,0,Math.PI*2);ctx.fillStyle=hg;ctx.fill();
+  });
+}
+
+function genGradBg(ctx,w,h,pal,cfg){
+  const ang=cfg.ang*Math.PI/180;
+  const dx=Math.cos(ang),dy=Math.sin(ang);
+  const diag=Math.sqrt(w*w+h*h);
+  const g=ctx.createLinearGradient(w/2-dx*diag,h/2-dy*diag,w/2+dx*diag,h/2+dy*diag);
+  g.addColorStop(0,pal.c1);g.addColorStop(0.35,pal.c2);g.addColorStop(0.65,pal.c3);g.addColorStop(1,pal.c4);
+  ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+  // Vertical lines overlay
+  const lw2=Math.max(1,w/cfg.sp*0.015);
+  for(let x=0;x<w;x+=w/60){
+    const t=x/w;
+    ctx.fillStyle=hexA('#ffffff',0.06+t*0.08);
+    ctx.fillRect(x,0,lw2,h);
+  }
+}
+
+function genGradOrbs(ctx,w,h,pal,cfg){
+  const orbs=[[0.2,0.3,0.6,pal.c1,pal.c3],[0.8,0.4,0.55,pal.c2,pal.c4],[0.45,0.75,0.5,pal.c3,pal.c1],[0.65,0.15,0.35,pal.c4,pal.c2]];
+  orbs.forEach(([fx,fy,fs,ca,cb])=>{
+    const r=w*fs*0.5;const cx=w*fx,cy=h*fy;
+    const rg=ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+    rg.addColorStop(0,hexA(ca,0.7));rg.addColorStop(0.6,hexA(cb,0.4));rg.addColorStop(1,hexA(ca,0));
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fillStyle=rg;ctx.fill();
+  });
+}
+
+function genWavy(ctx,w,h,pal,cfg){
+  const ang=cfg.ang*Math.PI/180;
+  const dx=Math.cos(ang),dy=Math.sin(ang);
+  const nx=-dy,ny=dx;
+  const diag=Math.sqrt(w*w+h*h);
+  const cx=w/2,cy=h/2;const steps=80;
+  let li=0;
+  for(let off=-diag;off<=diag;off+=cfg.sp){
+    const t=li/(Math.ceil(2*diag/cfg.sp));
+    const col=gradColor(pal,t);
+    ctx.beginPath();
+    for(let i=0;i<=steps;i++){
+      const s=-diag+(2*diag)*(i/steps);
+      const wave=cfg.wa*Math.sin(s*0.02*cfg.wf+off*0.01);
+      const px=cx+dx*s+nx*off+nx*wave;
+      const py=cy+dy*s+ny*off+ny*wave;
+      i===0?ctx.moveTo(px,py):ctx.lineTo(px,py);
+    }
+    ctx.strokeStyle=col;ctx.lineWidth=cfg.lw;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke();
+    li++;
+  }
+}
+
+function genStraight(ctx,w,h,pal,cfg){
+  genWavy(ctx,w,h,pal,{...cfg,wa:0});
+}
+
+function genConcArc(ctx,w,h,pal,cfg){
+  const c=cpt(cfg.corner,w,h);
+  const diag=Math.sqrt(w*w+h*h)*1.4;
+  let ri=0;
+  for(let r=cfg.sp;r<=diag;r+=cfg.sp){
+    const t=r/diag;
+    ctx.beginPath();ctx.arc(c.x,c.y,r,0,Math.PI*2);
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw;ctx.stroke();
+    ri++;
+  }
+}
+
+function genConcCenter(ctx,w,h,pal,cfg){
+  const cx=w/2,cy=h/2;
+  const diag=Math.sqrt(w*w+h*h)*0.72;
+  for(let r=cfg.sp;r<=diag;r+=cfg.sp){
+    const t=r/diag;
+    ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw;ctx.stroke();
+  }
+}
+
+function genDiagBands(ctx,w,h,pal,cfg){
+  const ang=cfg.ang*Math.PI/180;
+  const dx=Math.cos(ang),dy=Math.sin(ang);
+  const nx=-dy,ny=dx;
+  const diag=Math.sqrt(w*w+h*h);
+  const cx=w/2,cy=h/2;let bi=0;
+  for(let off=-diag;off<=diag;off+=cfg.sp*cfg.lw){
+    const t=bi/(Math.ceil(2*diag/(cfg.sp*cfg.lw)));
+    const bw=cfg.sp*cfg.lw;
+    ctx.save();
+    ctx.translate(cx+nx*off,cy+ny*off);ctx.rotate(ang);
+    ctx.fillStyle=gradColor(pal,t);
+    ctx.fillRect(-diag,-bw/2,diag*2,bw);
+    ctx.restore();bi++;
+  }
+}
+
+function genBarcode(ctx,w,h,pal,cfg){
+  const vert=cfg.ang%180>45&&cfg.ang%180<135;
+  let pos=0;const total=vert?w:h;let bi=0;
+  const count=Math.ceil(total/(cfg.sp*0.5));
+  while(pos<total){
+    const thickness=Math.max(1,cfg.sp*rr(0.3,1.6));
+    const t=bi/count;
+    if(vert){ctx.fillStyle=gradColor(pal,t);ctx.fillRect(pos,0,thickness,h);}
+    else{ctx.fillStyle=gradColor(pal,t);ctx.fillRect(0,pos,w,thickness);}
+    pos+=thickness+cfg.sp*0.1;bi++;
+  }
+}
+
+function genTaperedFan(ctx,w,h,pal,cfg){
+  const c=cpt(cfg.corner,w,h);
+  const diag=Math.sqrt(w*w+h*h)*1.4;
+  const fanCount=Math.ceil(diag/cfg.sp);
+  for(let i=0;i<fanCount;i++){
+    const t=i/fanCount;
+    const ang=t*Math.PI*2;
+    const ex=c.x+Math.cos(ang)*diag,ey=c.y+Math.sin(ang)*diag;
+    ctx.beginPath();ctx.moveTo(c.x,c.y);ctx.lineTo(ex,ey);
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw*(1-t*0.7);ctx.stroke();
+  }
+}
+
+function genBoldStripe(ctx,w,h,pal,cfg){
+  const vert=cfg.ang%180>45&&cfg.ang%180<135;
+  const total=vert?w:h;
+  const count=Math.ceil(total/cfg.sp)+1;
+  for(let i=0;i<count;i++){
+    const t=i/count;const pos=i*cfg.sp;
+    const c1=gradColor(pal,t),c2=gradColor(pal,t+0.05);
+    if(vert){
+      const g=ctx.createLinearGradient(pos,0,pos+cfg.sp,h);
+      g.addColorStop(0,c1);g.addColorStop(1,c2);
+      ctx.fillStyle=g;ctx.fillRect(pos,0,cfg.sp,h);
+    } else {
+      const g=ctx.createLinearGradient(0,pos,w,pos+cfg.sp);
+      g.addColorStop(0,c1);g.addColorStop(1,c2);
+      ctx.fillStyle=g;ctx.fillRect(0,pos,w,cfg.sp);
+    }
+  }
+}
+
+function genChevron(ctx,w,h,pal,cfg){
+  const c=cpt(cfg.corner,w,h);
+  const diag=Math.sqrt(w*w+h*h)*1.5;let ri=0;
+  for(let r=cfg.sp;r<=diag;r+=cfg.sp){
+    const t=ri/(diag/cfg.sp);
+    ctx.beginPath();ctx.moveTo(c.x+r,c.y);ctx.lineTo(c.x,c.y+r);
+    ctx.lineTo(c.x-r,c.y);ctx.lineTo(c.x,c.y-r);ctx.closePath();
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw;ctx.stroke();ri++;
+  }
+}
+
+function genCrosshatch(ctx,w,h,pal,cfg){
+  genWavy(ctx,w,h,pal,{...cfg,wa:0});
+  genWavy(ctx,w,h,pal,{...cfg,ang:cfg.ang+90,wa:0,sp:cfg.sp*1.4});
+}
+
+function genDotGrid(ctx,w,h,pal,cfg){
+  const step=cfg.sp;let ri=0,ci2=0;
+  for(let y=step*0.5;y<h;y+=step){
+    for(let x=step*0.5;x<w;x+=step){
+      const t=Math.sqrt(x*x+y*y)/Math.sqrt(w*w+h*h);
+      ctx.beginPath();ctx.arc(x,y,cfg.lw*0.8,0,Math.PI*2);
+      ctx.fillStyle=gradColor(pal,t);ctx.fill();ci2++;
+    }ri++;
+  }
+}
+
+function genHalfCircleLines(ctx,w,h,pal,cfg){
+  // Left half circles + right straight lines
+  const cx=w*0.42,cy=h/2;
+  const maxR=Math.min(w,h)*0.5;
+  for(let r=cfg.sp;r<=maxR*1.3;r+=cfg.sp){
+    const t=r/(maxR*1.3);
+    ctx.beginPath();ctx.arc(cx,cy,r,Math.PI*0.5,Math.PI*1.5);
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw;ctx.stroke();
+  }
+  // Straight lines right side
+  for(let y=cfg.sp;y<=h;y+=cfg.sp){
+    const t=y/h;
+    ctx.beginPath();ctx.moveTo(cx,y);ctx.lineTo(w,y);
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw;ctx.stroke();
+  }
+}
+
+function genColumnLines(ctx,w,h,pal,cfg){
+  const spacing=cfg.sp*1.5;
+  for(let x=spacing;x<=w;x+=spacing){
+    const t=x/w;
+    ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);
+    ctx.strokeStyle=gradColor(pal,t);ctx.lineWidth=cfg.lw*(0.5+Math.sin(t*Math.PI)*1.2);ctx.stroke();
+  }
+}
+
+// Gradient color interpolation from palette
+function gradColor(pal,t){
+  t=Math.max(0,Math.min(1,t));
+  const cols=[pal.c1,pal.c2,pal.c3,pal.c4];
+  const seg=1/(cols.length-1);const idx=Math.floor(t/seg);
+  const lt=(t-idx*seg)/seg;
+  const a=cols[Math.min(idx,cols.length-2)];
+  const b=cols[Math.min(idx+1,cols.length-1)];
+  return lerpHex(a,b,Math.max(0,Math.min(1,lt)));
+}
+function lerpHex(a,b,t){
+  const ar=parseInt(a.slice(1,3),16),ag=parseInt(a.slice(3,5),16),ab2=parseInt(a.slice(5,7),16);
+  const br=parseInt(b.slice(1,3),16),bg2=parseInt(b.slice(3,5),16),bb=parseInt(b.slice(5,7),16);
+  const r=Math.round(ar+(br-ar)*t),g2=Math.round(ag+(bg2-ag)*t),b2=Math.round(ab2+(bb-ab2)*t);
+  return`#${r.toString(16).padStart(2,'0')}${g2.toString(16).padStart(2,'0')}${b2.toString(16).padStart(2,'0')}`;
+}
+
+// ── CHROME / TEXT ────────────────────────────────────────────
+function drawChrome(ctx,w,h,idx,pal,cfg){
+  let tc;
+  const tm=getTextColor();
+  if(tm==='dark') tc='#1a1008';
+  else if(tm==='light') tc='#f5f0ff';
+  else tc=contrast(pal.bg);
+  const pad=w*0.055;
+  const words=(cfg.words||'').split(',').map(s=>s.trim()).filter(Boolean);
+  const word=(words.length?words[idx%words.length]:'DESIGN').toUpperCase();
+  const titleSz=Math.max(12,h*0.07);
+  const metaSz=Math.max(6,w*0.026);
+
+  // Meta top-left
+  ctx.fillStyle=tc;ctx.font=`600 ${metaSz}px Segoe UI,Arial,sans-serif`;
+  ctx.textAlign='left';
+  if(cfg.meta) ctx.fillText((cfg.meta||'').toUpperCase(),pad,pad+metaSz*1.1);
+
+  // ART number top-right
+  const artN=String(cfg.artN+idx).padStart(2,'0');
+  ctx.textAlign='right';
+  ctx.font=`800 ${metaSz*1.15}px Segoe UI,Arial,sans-serif`;
+  ctx.fillStyle=tc;ctx.fillText(artN,w-pad,pad+metaSz*1.4);
+  ctx.font=`600 ${metaSz*0.72}px Segoe UI,Arial,sans-serif`;
+  ctx.fillText('ART',w-pad,pad+metaSz*0.5);
+
+  // Title bottom-left (vertical/angled)
+  ctx.save();ctx.translate(pad+titleSz*0.2,h-pad);ctx.rotate(-Math.PI/2);
+  ctx.textAlign='left';ctx.fillStyle=tc;
+  ctx.font=`900 ${titleSz}px Segoe UI,Arial Black,sans-serif`;
+  ctx.fillText(word,0,0);ctx.restore();
+
+  // Tagline bottom-right
+  ctx.textAlign='right';ctx.fillStyle=hexA(tc,0.75);
+  ctx.font=`600 ${metaSz}px Segoe UI,Arial,sans-serif`;
+  if(cfg.tag) ctx.fillText((cfg.tag||'').toUpperCase(),w-pad,h-pad);
+}
+
+// ── ALL PATTERNS ─────────────────────────────────────────────
+const ALL_PATS=['sphere','half_sphere','multi_sphere','gradient_bg','gradient_orbs',
+  'wavy','straight','concentric_arc','concentric_center','diagonal_bands','barcode','tapered_lines',
+  'bold_stripe','chevron','crosshatch','dot_grid','half_circle_lines','column_lines'];
+
+function drawPattern(ctx,w,h,pat,pal,cfg){
+  switch(pat){
+    case 'sphere':         genSphere(ctx,w,h,pal,cfg); break;
+    case 'half_sphere':    genHalfSphere(ctx,w,h,pal,cfg); break;
+    case 'multi_sphere':   genMultiSphere(ctx,w,h,pal,cfg); break;
+    case 'gradient_bg':    genGradBg(ctx,w,h,pal,cfg); break;
+    case 'gradient_orbs':  genGradOrbs(ctx,w,h,pal,cfg); break;
+    case 'wavy':           genWavy(ctx,w,h,pal,cfg); break;
+    case 'straight':       genStraight(ctx,w,h,pal,cfg); break;
+    case 'concentric_arc': genConcArc(ctx,w,h,pal,cfg); break;
+    case 'concentric_center': genConcCenter(ctx,w,h,pal,cfg); break;
+    case 'diagonal_bands': genDiagBands(ctx,w,h,pal,cfg); break;
+    case 'barcode':        genBarcode(ctx,w,h,pal,cfg); break;
+    case 'tapered_lines':  genTaperedFan(ctx,w,h,pal,cfg); break;
+    case 'bold_stripe':    genBoldStripe(ctx,w,h,pal,cfg); break;
+    case 'chevron':        genChevron(ctx,w,h,pal,cfg); break;
+    case 'crosshatch':     genCrosshatch(ctx,w,h,pal,cfg); break;
+    case 'dot_grid':       genDotGrid(ctx,w,h,pal,cfg); break;
+    case 'half_circle_lines': genHalfCircleLines(ctx,w,h,pal,cfg); break;
+    case 'column_lines':   genColumnLines(ctx,w,h,pal,cfg); break;
+    default:               genWavy(ctx,w,h,pal,cfg);
+  }
+}
+
+// ── READ CONFIG ─────────────────────────────────────────────
+function readCfg(){
+  return{
+    count:+$('cnt').value, sz:$('sz').value, gap:+$('gap').value,
+    pat:$('pat').value,corner:$('corner').value,
+    ang:+$('ang').value,sp:+$('sp').value,lw:+$('lw').value,
+    wa:+$('wa').value,wf:+$('wf').value,
+    ss:+$('ss').value,sd:+$('sd').value,
+    gs:+$('gs').value,ci:+$('ci').value,
+    cm:$('cm').value,
+    manBg:$('bgC').value,manInk:$('inkC').value,manAcc:$('accC').value,
+    showTxt:$('showTxt').checked,
+    words:$('words').value,tag:$('tag').value,meta:$('meta').value,artN:+$('artN').value,
+    pals:actPals
+  };
+}
+function updLabels(){
+  $('gV').textContent=$('gap').value;
+  $('angV').textContent=$('ang').value+'°';
+  $('spV').textContent=$('sp').value;
+  $('lwV').textContent=$('lw').value;
+  $('waV').textContent=$('wa').value;
+  $('wfV').textContent=$('wf').value;
+  $('ssV').textContent=$('ss').value;
+  $('sdV').textContent=$('sd').value;
+  $('gsV').textContent=$('gs').value;
+  $('ciV').textContent=$('ci').value;
+}
+
+// ── GENERATE ─────────────────────────────────────────────────
+const cv=$('cv');const ctx2=cv.getContext('2d');
+let posters=[],lastCfg=null;
+
+function pickPal(idx,cfg){
+  if(cfg.cm==='mono'||cfg.cm==='duo'){
+    return{bg:cfg.manBg,c1:cfg.manInk,c2:cfg.manAcc,c3:cfg.manInk,c4:cfg.manAcc,ink:cfg.manInk};
+  }
+  const pool=cfg.pals;return pool[idx%pool.length];
+}
+
+function generate(){
+  rng=mulb(designSeed);
+  const cfg=readCfg();lastCfg=cfg;
+  const[wS,hS]=cfg.sz.split('x');const tW=+wS,tH=+hS;
+  const totW=cfg.count*tW+(cfg.count-1)*cfg.gap;
+  cv.width=totW;cv.height=tH;
+  ctx2.clearRect(0,0,totW,tH);posters=[];
+
+  for(let i=0;i<cfg.count;i++){
+    const x0=i*(tW+cfg.gap);
+    const pal=pickPal(i,cfg);
+    const pat2=cfg.pat==='mix'?ch(ALL_PATS):cfg.pat;
+    const corner2=cfg.corner==='random'?ch(['topLeft','topRight','bottomLeft','bottomRight','center','edgeBottom']):cfg.corner;
+    ctx2.save();
+    ctx2.beginPath();ctx2.rect(x0,0,tW,tH);ctx2.clip();
+
+    // Background fill
+    if(pat2==='gradient_bg'||pat2==='gradient_orbs'||pat2.includes('sphere')||pat2==='bold_stripe'||pat2==='diagonal_bands'||pat2==='barcode'){
+      // These patterns handle their own bg via paint
+      ctx2.fillStyle=pal.bg;ctx2.fillRect(x0,0,tW,tH);
+    } else {
+      // Line patterns: gradient bg first
+      const gbg=ctx2.createLinearGradient(x0,0,x0+tW,tH);
+      gbg.addColorStop(0,pal.bg);gbg.addColorStop(1,lerpHex(pal.bg,pal.c1,0.12));
+      ctx2.fillStyle=gbg;ctx2.fillRect(x0,0,tW,tH);
+    }
+
+    ctx2.translate(x0,0);
+    drawPattern(ctx2,tW,tH,pat2,pal,{...cfg,corner:corner2});
+    if(cfg.showTxt) drawChrome(ctx2,tW,tH,i,pal,cfg);
+    ctx2.restore();
+    posters.push({pal,pat:pat2,x0,w:tW,h:tH});
+  }
+  $('note').textContent=`${cfg.count} posters · ${tW}×${tH}px each`;
+}
+
+// ── PALETTE UI ────────────────────────────────────────────────
+function renderPgrid(){
+  const g=$('pgrid');g.innerHTML='';
+  PALS.forEach((p,i)=>{
+    const d=document.createElement('div');d.className='psw';
+    d.style.background=`linear-gradient(135deg,${p.c1} 0%,${p.c2} 40%,${p.c3} 70%,${p.c4} 100%)`;
+    if(actPals.includes(p)) d.classList.add('on');
+    d.title=`${p.c1}→${p.c2}→${p.c3}`;
+    d.onclick=()=>{
+      if(d.classList.contains('on')){if(actPals.length>1)actPals=actPals.filter(x=>x!==p);}
+      else actPals.push(p);
+      renderPgrid();generate();
+    };
+    g.appendChild(d);
+  });
+}
+function syncColorMode(){
+  const m=$('cm').value;
+  $('palWrap').style.display=m==='gradient'?'block':'none';
+  $('mWrap').style.display=m!=='gradient'?'block':'none';
+}
+
+// ── EVENTS ────────────────────────────────────────────────────
+$('cm').onchange=()=>{syncColorMode();generate();};
+document.querySelectorAll('#sb input[type=range]').forEach(el=>el.addEventListener('input',()=>{updLabels();generate();}));
+['cnt','sz','pat','corner','bgC','inkC','accC','tcm'].forEach(id=>{$(id).addEventListener('change',generate);$(id).addEventListener('input',generate);});
+['showTxt'].forEach(id=>$(id).addEventListener('change',generate));
+['words','tag','meta','artN'].forEach(id=>$(id).addEventListener('input',generate));
+
+$('rndBtn').onclick=()=>{
+  designSeed=(Math.random()*1e9)|0;rng=mulb(designSeed);
+  $('ang').value=Math.floor(rr(0,180));
+  $('sp').value=Math.round(rr(3,22));
+  $('lw').value=(rr(0.8,6)).toFixed(1);
+  $('wa').value=Math.round(rr(0,80));
+  $('wf').value=(rr(1.5,10)).toFixed(1);
+  $('ss').value=Math.round(rr(40,100));
+  $('sd').value=Math.round(rr(6,32));
+  $('pat').value='mix';$('corner').value='random';
+  actPals=[...PALS].sort(()=>rand()-0.5).slice(0,5+Math.floor(rand()*5));
+  renderPgrid();updLabels();generate();
+};
+
+// ── TRUE VECTOR SVG EXPORT (Melo Pos) ────────────────────────
+// Canvas 2D shim: the same pattern generators run against this
+// instead of the canvas, so the SVG is real editable vector
+// shapes (circles, paths, gradients, text) — not a PNG inside.
+function _svgNum(n){return Math.round(n*100)/100;}
+function _svgCol(s){
+  if(!s) return{fill:'#000',op:null};
+  if(typeof s!=='string') return{fill:'#000',op:null};
+  const m=s.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)$/);
+  if(m) return{fill:`rgb(${m[1]},${m[2]},${m[3]})`,op:m[4]===undefined?null:+m[4]};
+  return{fill:s,op:null};
+}
+class SvgCtx{
+  constructor(w,h,pfx){
+    this.w=w;this.h=h;this.pfx=pfx||'';
+    this.defs=[];this.gradN=0;this.clipN=0;
+    this.containers=[{els:[],clip:null}];
+    this.frames=[];
+    this.m=[1,0,0,1,0,0];
+    this.fillStyle='#000';this.strokeStyle='#000';
+    this.lineWidth=1;this.lineJoin='miter';this.lineCap='butt';
+    this.font='12px sans-serif';this.textAlign='left';
+    this.path=[];
+  }
+  _el(){return this.containers[this.containers.length-1].els;}
+  _ap(x,y){const[a,b,c,d,e,f]=this.m;return[a*x+c*y+e,b*x+d*y+f];}
+  _rot(){return Math.atan2(this.m[1],this.m[0]);}
+  save(){this.frames.push({m:this.m.slice(),fill:this.fillStyle,stroke:this.strokeStyle,lw:this.lineWidth,lj:this.lineJoin,lc:this.lineCap,font:this.font,ta:this.textAlign,depth:this.containers.length});}
+  restore(){
+    const s=this.frames.pop();if(!s)return;
+    this.m=s.m;this.fillStyle=s.fill;this.strokeStyle=s.stroke;this.lineWidth=s.lw;this.lineJoin=s.lj;this.lineCap=s.lc;this.font=s.font;this.textAlign=s.ta;
+    while(this.containers.length>s.depth){
+      const c=this.containers.pop();
+      const parent=this.containers[this.containers.length-1];
+      parent.els.push(c.clip?`<g clip-path="url(#${c.clip})">${c.els.join('')}</g>`:c.els.join(''));
+    }
+  }
+  translate(x,y){const[a,b,c,d,e,f]=this.m;this.m=[a,b,c,d,e+a*x+c*y,f+b*x+d*y];}
+  rotate(a){const cos=Math.cos(a),sin=Math.sin(a);const[m0,m1,m2,m3,e,f]=this.m;this.m=[m0*cos+m2*sin,m1*cos+m3*sin,m0*-sin+m2*cos,m1*-sin+m3*cos,e,f];}
+  beginPath(){this.path=[];}
+  moveTo(x,y){const[px,py]=this._ap(x,y);this.path.push({t:'M',x:_svgNum(px),y:_svgNum(py)});}
+  lineTo(x,y){const[px,py]=this._ap(x,y);this.path.push({t:'L',x:_svgNum(px),y:_svgNum(py)});}
+  closePath(){this.path.push({t:'Z'});}
+  rect(x,y,w,h){this.path.push({t:'R',x,y,w,h});}
+  arc(x,y,r,a0,a1,ccw){this.path.push({t:'A',cx:x,cy:y,r,rx:r,ry:r,rot:0,a0,a1,ccw:!!ccw});}
+  ellipse(x,y,rx,ry,rot,a0,a1,ccw){this.path.push({t:'A',cx:x,cy:y,r:Math.max(rx,ry),rx,ry,rot,a0,a1,ccw:!!ccw});}
+  clip(){
+    const id=this.pfx+'clip'+(this.clipN++);
+    let inner='';
+    for(const s of this.path){
+      if(s.t==='R'){const[x,y]=this._ap(s.x,s.y);inner+=`<rect x="${_svgNum(x)}" y="${_svgNum(y)}" width="${_svgNum(s.w)}" height="${_svgNum(s.h)}"/>`;}
+      else if(s.t==='A'){inner+=`<path d="${this._arcD(s)}"/>`;}
+    }
+    if(!inner){const[x,y]=this._ap(0,0);inner=`<rect x="${_svgNum(x)}" y="${_svgNum(y)}" width="${this.w}" height="${this.h}"/>`;}
+    this.defs.push(`<clipPath id="${id}">${inner}</clipPath>`);
+    this.containers.push({els:[],clip:id});
+  }
+  _arcD(s){
+    const rot=this._rot()+ (s.rot||0);
+    const[cx,cy]=this._ap(s.cx,s.cy);
+    const a0=s.a0+this._rot(), a1=s.a1+this._rot();
+    const sx=cx+Math.cos(a0)*s.rx, sy=cy+Math.sin(a0)*s.ry;
+    const ex=cx+Math.cos(a1)*s.rx, ey=cy+Math.sin(a1)*s.ry;
+    let span=a1-a0; if(s.ccw) span=-span;
+    const large=Math.abs(span)>Math.PI?1:0;
+    const sweep=s.ccw?0:1;
+    const deg=_svgNum(rot*180/Math.PI);
+    return `M ${_svgNum(sx)} ${_svgNum(sy)} A ${_svgNum(s.rx)} ${_svgNum(s.ry)} ${deg} ${large} ${sweep} ${_svgNum(ex)} ${_svgNum(ey)}`;
+  }
+  _pathD(){
+    let d='';
+    for(const s of this.path){
+      if(s.t==='M') d+=`M ${s.x} ${s.y} `;
+      else if(s.t==='L') d+=`L ${s.x} ${s.y} `;
+      else if(s.t==='Z') d+='Z ';
+      else if(s.t==='R'){
+        const[a,b,c2,d2]=[this._ap(s.x,s.y),this._ap(s.x+s.w,s.y),this._ap(s.x+s.w,s.y+s.h),this._ap(s.x,s.y+s.h)];
+        d+=`M ${_svgNum(a[0])} ${_svgNum(a[1])} L ${_svgNum(b[0])} ${_svgNum(b[1])} L ${_svgNum(c2[0])} ${_svgNum(c2[1])} L ${_svgNum(d2[0])} ${_svgNum(d2[1])} Z `;
+      }
+      else if(s.t==='A') d+=this._arcD(s)+' ';
+    }
+    return d.trim();
+  }
+  _isFullArc(){
+    if(this.path.length!==1||this.path[0].t!=='A') return null;
+    const s=this.path[0];
+    return Math.abs(Math.abs(s.a1-s.a0)-Math.PI*2)<0.01?s:null;
+  }
+  _styleAttr(style){
+    if(style&&typeof style==='object'){
+      if(!style._id){
+        style._id=this.pfx+'g'+(this.gradN++);
+        let stops='';
+        for(const st of style.stops){
+          const c=_svgCol(st.c);
+          stops+=`<stop offset="${st.o}" stop-color="${c.fill}"${c.op!==null&&c.op!==1?` stop-opacity="${c.op}"`:''}/>`;
+        }
+        if(style.kind==='linear') this.defs.push(`<linearGradient id="${style._id}" gradientUnits="userSpaceOnUse" x1="${_svgNum(style.x1)}" y1="${_svgNum(style.y1)}" x2="${_svgNum(style.x2)}" y2="${_svgNum(style.y2)}">${stops}</linearGradient>`);
+        else this.defs.push(`<radialGradient id="${style._id}" gradientUnits="userSpaceOnUse" cx="${_svgNum(style.cx)}" cy="${_svgNum(style.cy)}" r="${_svgNum(style.r)}" fx="${_svgNum(style.fx)}" fy="${_svgNum(style.fy)}" fr="${_svgNum(style.fr)}">${stops}</radialGradient>`);
+      }
+      return `url(#${style._id})`;
+    }
+    return null;
+  }
+  _fillAttrs(){
+    const u=this._styleAttr(this.fillStyle);
+    if(u) return `fill="${u}"`;
+    const c=_svgCol(this.fillStyle);
+    return `fill="${c.fill}"${c.op!==null?` fill-opacity="${c.op}"`:''}`;
+  }
+  _strokeAttrs(){
+    const u=this._styleAttr(this.strokeStyle);
+    let a;
+    if(u) a=`stroke="${u}"`;
+    else{const c=_svgCol(this.strokeStyle);a=`stroke="${c.fill}"${c.op!==null?` stroke-opacity="${c.op}"`:''}`;}
+    return `${a} stroke-width="${_svgNum(this.lineWidth)}" stroke-linejoin="${this.lineJoin}" stroke-linecap="${this.lineCap}"`;
+  }
+  fill(){
+    const full=this._isFullArc();
+    if(full){
+      const[cx,cy]=this._ap(full.cx,full.cy);
+      const rot=_svgNum((this._rot()+(full.rot||0))*180/Math.PI);
+      const tr=rot?` transform="rotate(${rot} ${_svgNum(cx)} ${_svgNum(cy)})"`:'';
+      if(Math.abs(full.rx-full.ry)<0.01) this._el().push(`<circle cx="${_svgNum(cx)}" cy="${_svgNum(cy)}" r="${_svgNum(full.rx)}"${tr} ${this._fillAttrs()}/>`);
+      else this._el().push(`<ellipse cx="${_svgNum(cx)}" cy="${_svgNum(cy)}" rx="${_svgNum(full.rx)}" ry="${_svgNum(full.ry)}"${tr} ${this._fillAttrs()}/>`);
+      return;
+    }
+    const d=this._pathD(); if(!d) return;
+    this._el().push(`<path d="${d}" ${this._fillAttrs()}/>`);
+  }
+  stroke(){
+    const full=this._isFullArc();
+    if(full){
+      const[cx,cy]=this._ap(full.cx,full.cy);
+      const rot=_svgNum((this._rot()+(full.rot||0))*180/Math.PI);
+      const tr=rot?` transform="rotate(${rot} ${_svgNum(cx)} ${_svgNum(cy)})"`:'';
+      if(Math.abs(full.rx-full.ry)<0.01) this._el().push(`<circle cx="${_svgNum(cx)}" cy="${_svgNum(cy)}" r="${_svgNum(full.rx)}"${tr} fill="none" ${this._strokeAttrs()}/>`);
+      else this._el().push(`<ellipse cx="${_svgNum(cx)}" cy="${_svgNum(cy)}" rx="${_svgNum(full.rx)}" ry="${_svgNum(full.ry)}"${tr} fill="none" ${this._strokeAttrs()}/>`);
+      return;
+    }
+    const d=this._pathD(); if(!d) return;
+    this._el().push(`<path d="${d}" fill="none" ${this._strokeAttrs()}/>`);
+  }
+  fillRect(x,y,w,h){
+    const rot=this._rot();
+    if(Math.abs(rot)<0.001){
+      const[px,py]=this._ap(x,y);
+      this._el().push(`<rect x="${_svgNum(px)}" y="${_svgNum(py)}" width="${_svgNum(w)}" height="${_svgNum(h)}" ${this._fillAttrs()}/>`);
+    }else{
+      x-=0.6;y-=0.6;w+=1.2;h+=1.2;
+      const pts=[[x,y],[x+w,y],[x+w,y+h],[x,y+h]].map(p=>this._ap(p[0],p[1]));
+      this._el().push(`<polygon points="${pts.map(p=>_svgNum(p[0])+','+_svgNum(p[1])).join(' ')}" ${this._fillAttrs()}/>`);
+    }
+  }
+  clearRect(){}
+  createLinearGradient(x1,y1,x2,y2){return{kind:'linear',x1,y1,x2,y2,stops:[],addColorStop(o,c){this.stops.push({o,c});}};}
+  createRadialGradient(x0,y0,r0,x1,y1,r1){return{kind:'radial',fx:x0,fy:y0,fr:r0,cx:x1,cy:y1,r:r1,stops:[],addColorStop(o,c){this.stops.push({o,c});}};}
+  fillText(txt,x,y){
+    const[px,py]=this._ap(x,y);
+    const rot=_svgNum(this._rot()*180/Math.PI);
+    const fm=this.font.match(/(\d+)\s+([\d.]+)px\s+(.+)/);
+    const wt=fm?fm[1]:'400', sz=fm?fm[2]:'12', fam=fm?fm[3].split(',')[0].replace(/[\'"]/g,'').trim():'sans-serif';
+    const anchor=this.textAlign==='right'?'end':this.textAlign==='center'?'middle':'start';
+    const tr=rot?` transform="rotate(${rot} ${_svgNum(px)} ${_svgNum(py)})"`:'';
+    const c=_svgCol(this.fillStyle);
+    this._el().push(`<text x="${_svgNum(px)}" y="${_svgNum(py)}" font-family="${fam}" font-size="${sz}" font-weight="${wt}" text-anchor="${anchor}" fill="${c.fill}"${c.op!==null?` fill-opacity="${c.op}"`:''}${tr}>${String(txt).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</text>`);
+  }
+  get body(){return this.containers[0].els.join('');}
+}
+function buildVectorSVG(){
+  const cfg=readCfg();if(!cfg) return '';
+  rng=mulb(designSeed);
+  const[wS,hS]=cfg.sz.split('x');const tW=+wS,tH=+hS;
+  const totW=cfg.count*tW+(cfg.count-1)*cfg.gap;
+  const defs=[],parts=[];
+  for(let i=0;i<cfg.count;i++){
+    const pal=pickPal(i,cfg);
+    const pat2=cfg.pat==='mix'?ch(ALL_PATS):cfg.pat;
+    const corner2=cfg.corner==='random'?ch(['topLeft','topRight','bottomLeft','bottomRight','center','edgeBottom']):cfg.corner;
+    const sh=new SvgCtx(tW,tH,'p'+i+'-');
+    if(pat2==='gradient_bg'||pat2==='gradient_orbs'||pat2.includes('sphere')||pat2==='bold_stripe'||pat2==='diagonal_bands'||pat2==='barcode'){
+      sh.fillStyle=pal.bg;sh.fillRect(0,0,tW,tH);
+    }else{
+      const gbg=sh.createLinearGradient(0,0,tW,tH);
+      gbg.addColorStop(0,pal.bg);gbg.addColorStop(1,lerpHex(pal.bg,pal.c1,0.12));
+      sh.fillStyle=gbg;sh.fillRect(0,0,tW,tH);
+    }
+    drawPattern(sh,tW,tH,pat2,pal,{...cfg,corner:corner2});
+    if(cfg.showTxt) drawChrome(sh,tW,tH,i,pal,cfg);
+    defs.push(...sh.defs);
+    defs.push(`<clipPath id="pclip${i}"><rect x="0" y="0" width="${tW}" height="${tH}"/></clipPath>`);
+    parts.push(`<g transform="translate(${i*(tW+cfg.gap)},0)"><g clip-path="url(#pclip${i})">${sh.body}</g></g>`);
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?><svg xmlns="http://www.w3.org/2000/svg" width="${totW}" height="${tH}" viewBox="0 0 ${totW} ${tH}"><defs>${defs.join('')}</defs>${parts.join('')}</svg>`;
+}
+
+// ── SVG EXPORT ────────────────────────────────────────────────
+$('dlPng').onclick=()=>{cv.toBlob(b=>{const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='gradient-poster-set.png';a.click();});};
+$('dlSvg').onclick=()=>{
+  try{
+    const svg=buildVectorSVG();if(!svg) return;
+    const b=new Blob([svg],{type:'image/svg+xml'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='gradient-poster-set.svg';a.click();
+    generate();
+  }catch(e){$('note').textContent='SVG export failed: '+e.message;}
+};
+
+// ── INIT ─────────────────────────────────────────────────────
+renderPgrid();syncColorMode();updLabels();generate();
+</script>
+</body>
+</html>

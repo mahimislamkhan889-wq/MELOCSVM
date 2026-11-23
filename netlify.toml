@@ -17,6 +17,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/muse/*"
+  to = "/.netlify/functions/muse/:splat"
+  status = 200
+
+[[redirects]]
   from = "/api/generate"
   to = "/.netlify/functions/generate"
   status = 200

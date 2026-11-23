@@ -63,7 +63,9 @@ export async function handler(event: any, context: any) {
         apiKey: currentKey,
         httpOptions: { headers: { 'User-Agent': 'aistudio-build' } }
       });
+      let keyHasZeroQuota = false;
       for (const modelCandidate of candidateModels) {
+        if (keyHasZeroQuota) break;
         try {
           const modelConfig: any = {
             systemInstruction: config?.systemInstruction,
@@ -85,7 +87,12 @@ export async function handler(event: any, context: any) {
           }
         } catch (err: any) {
           lastGenErr = err;
-          console.warn(`Netlify model ${modelCandidate} failed (${err?.status || err?.message?.slice(0, 80)}).`);
+          const errStr = String(err?.message || err || "");
+          if (errStr.includes('"quota_limit_value":"0"') || errStr.includes('quota_limit_value: "0"')) {
+            keyHasZeroQuota = true;
+            break;
+          }
+          console.warn(`Netlify model ${modelCandidate} notice (${err?.status || errStr.slice(0, 60)}).`);
         }
       }
       if (response && response.text) {

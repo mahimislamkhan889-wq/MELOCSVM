@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="ur">
+<head>
+<meta charset="UTF-8">
+<title>Melo Glow</title>
+<style>
+  :root{
+    --bg:#121317; --panel:#191b20; --border:#2a2d34; --txt:#eee; --txt2:#9aa0a8;
+    --accent:#3fb8ff; --accent2:#8b5cff;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'Segoe UI',Tahoma,sans-serif;background:var(--bg);color:var(--txt);display:flex;min-height:100vh;}
+  #sidebar{width:340px;min-width:340px;background:var(--panel);padding:18px;overflow-y:auto;max-height:100vh;border-right:1px solid var(--border);}
+  #main{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:26px;gap:14px;}
+  h1{font-size:16px;margin:0 0 4px;color:#fff;}
+  .sub{font-size:12px;color:var(--txt2);margin-bottom:16px;line-height:1.5;}
+  .group{border:1px solid var(--border);border-radius:8px;padding:11px 12px 14px;margin-bottom:12px;background:#1d1f26;}
+  .group h3{font-size:11.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin:0 0 9px;}
+  label{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;margin:7px 0 3px;color:#cdd0d4;}
+  input[type=range]{width:58%;accent-color:var(--accent);}
+  select,input[type=color],input[type=number],input[type=text]{background:#0e0f13;color:#eee;border:1px solid #3a3d44;border-radius:5px;padding:5px 7px;font-size:12px;}
+  input[type=color]{width:42px;height:26px;padding:2px;}
+  input[type=text]{width:100%;margin-top:4px;}
+  .val{font-variant-numeric:tabular-nums;color:#8fd0ff;min-width:36px;text-align:right;}
+  .hint{font-size:11px;color:#888;line-height:1.5;margin:2px 0 8px;}
+  .pillwrap{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;}
+  .ppill{padding:5px 10px;border-radius:14px;font-size:11px;border:1px solid var(--border);cursor:pointer;
+    color:var(--txt2);background:rgba(255,255,255,.02);transition:all .12s;user-select:none;}
+  .ppill:hover{color:var(--txt);}
+  .ppill.on{background:linear-gradient(135deg,var(--accent),var(--accent2));border-color:var(--accent);color:#04121c;font-weight:700;}
+  .swatch{width:26px;height:26px;border-radius:50%;border:2px solid #3a3d44;cursor:pointer;padding:0;transition:transform .12s;}
+  .swatch:hover{transform:scale(1.15);}
+  .swatch.on{border-color:#fff;transform:scale(1.12);}
+  .swatchwrap{display:flex;flex-wrap:wrap;gap:7px;margin-top:4px;}
+  button{width:100%;padding:10px;border:none;border-radius:7px;font-size:13px;cursor:pointer;margin-top:4px;font-weight:700;}
+  #generateBtn{background:linear-gradient(135deg,var(--accent),var(--accent2));color:#04121c;font-size:14.5px;padding:13px;}
+  #generateBtn:hover{filter:brightness(1.08);}
+  #generateBtn:disabled{opacity:0.6;cursor:wait;}
+  .dl-row{display:flex;gap:8px;margin-top:6px;}
+  .dl-row button{background:#2c2f36;color:#eee;}
+  .dl-row button:hover{background:#383c45;}
+  .row{display:flex;align-items:center;justify-content:space-between;margin:7px 0;gap:8px;}
+  .cr{display:flex;gap:14px;margin-top:6px;flex-wrap:wrap;}
+  .cblk{display:flex;flex-direction:column;align-items:center;gap:3px;font-size:10.5px;color:var(--txt2);}
+  #canvasWrap{background:#000;border-radius:6px;box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:100%;}
+  canvas{display:block;max-width:min(74vw,1100px);max-height:80vh;width:auto;height:auto;border-radius:6px;}
+  #seedRow{font-size:11px;color:var(--txt2);text-align:center;}
+  #seedRow b{color:var(--accent);}
+  #customSizeRow{display:none;margin-top:6px;}
+  .badge{display:inline-block;font-size:9.5px;font-weight:700;letter-spacing:.04em;background:var(--accent);color:#04121c;padding:1px 6px;border-radius:10px;margin-left:6px;vertical-align:middle;}
+  .textFieldsRow{display:none;}
+  .textFieldsRow.show{display:block;}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h1 style="display:flex;align-items:center;gap:8px"><img src="data:image/jpeg;base64,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" alt="Melo logo" style="width:28px;height:28px;border-radius:8px;flex:none">Melo Glow <span class="badge">PRO</span></h1>
+  <div class="sub">Heavy-grain, soft-feathered glow backgrounds — bilkul us "trending" Adobe Stock look jaisa. Har click par naya wave, naya color, naya grain.</div>
+
+  <button id="generateBtn">🎲 Generate New Design</button>
+  <div id="seedRow">Seed: <b id="seedDisplay">—</b></div>
+
+  <div class="group">
+    <h3>Canvas Size (Adobe Stock Ready)</h3>
+    <label>Preset
+      <select id="sizePreset" style="width:62%;">
+        <option value="wideBanner">Wide Banner 4200×1750</option>
+        <option value="ultraWide">Ultra-wide 5000×1400</option>
+        <option value="land">Landscape 4500×3000 (13.5MP)</option>
+        <option value="sq3000">Square 3000×3000 (9MP)</option>
+        <option value="port">Portrait 3000×4500 (13.5MP)</option>
+        <option value="custom">Custom</option>
+      </select>
+    </label>
+    <div id="customSizeRow">
+      <div class="row" style="gap:6px;">
+        <input type="number" id="customW" min="800" max="8000" value="4200" style="width:47%;" placeholder="Width">
+        <input type="number" id="customH" min="800" max="8000" value="1750" style="width:47%;" placeholder="Height">
+      </div>
+    </div>
+    <div class="hint">Adobe Stock ko min 4 megapixels chahiye — ye sab presets us se kaafi upar hain.</div>
+  </div>
+
+  <div class="group">
+    <h3>Composition</h3>
+    <div class="hint">Glow kis shape mein flow kare</div>
+    <div class="pillwrap" id="compPills"></div>
+  </div>
+
+  <div class="group">
+    <h3>Colors</h3>
+    <div class="hint">Quick palettes — ek click mein glow color set karein</div>
+    <div class="swatchwrap" id="colorSwatches"></div>
+    <label style="margin-top:8px;">Custom color 1 <input type="color" id="customColor1" value="#1fc8ff"></label>
+    <label>Custom color 2 (duo-tone strands ke liye) <input type="color" id="customColor2" value="#8b5cff"></label>
+    <div class="row">
+      <label style="margin:0;" for="randomColorEach">Har generate par random color</label>
+      <input type="checkbox" id="randomColorEach">
+    </div>
+    <label style="margin-top:8px;">Background top <input type="color" id="bgTop" value="#05060a"></label>
+    <label>Background bottom <input type="color" id="bgBottom" value="#0b0d16"></label>
+  </div>
+
+  <div class="group">
+    <h3>Glow &amp; Feather</h3>
+    <label>Glow size <span class="val" id="glowSizeVal">100%</span></label>
+    <input type="range" id="glowSize" min="50" max="180" value="100" step="5">
+    <label>Feather amount <span class="val" id="featherVal">140%</span></label>
+    <input type="range" id="feather" min="40" max="220" value="140" step="5">
+    <div class="hint">Feather jitna zyada, glow ka edge utna hi soft/creamy hoga.</div>
+    <label>Glow brightness <span class="val" id="glowBrightVal">100%</span></label>
+    <input type="range" id="glowBright" min="50" max="160" value="100" step="5">
+  </div>
+
+  <div class="group">
+    <h3>Grain (Noise Texture)</h3>
+    <label>Grain intensity <span class="val" id="grainIntensityVal">65%</span></label>
+    <input type="range" id="grainIntensity" min="0" max="100" value="65" step="5">
+    <label>Grain size <span class="val" id="grainSizeVal">2px</span></label>
+    <input type="range" id="grainSize" min="1" max="5" value="2" step="1">
+    <div class="hint">Ye wahi dana-daar (grainy) film-texture effect hai jo is reference image mein hai. PNG mein true pixel-grain hota hai; SVG/EPS (Illustrator-safe) mein isi intensity se halke dots ka vector-grain banta hai, kyunke Illustrator asal pixel-noise filter support nahi karta.</div>
+  </div>
+
+  <div class="group">
+    <h3>Vignette</h3>
+    <div class="row">
+      <label style="margin:0;" for="vignetteOn">Edges thora dark karein</label>
+      <input type="checkbox" id="vignetteOn" checked>
+    </div>
+    <label>Vignette strength <span class="val" id="vignetteStrengthVal">55%</span></label>
+    <input type="range" id="vignetteStrength" min="0" max="100" value="55" step="5">
+  </div>
+
+  <div class="group">
+    <h3>Heading Text (optional)</h3>
+    <div class="row">
+      <label style="margin:0;" for="textOn">Text overlay dikhayein</label>
+      <input type="checkbox" id="textOn">
+    </div>
+    <div id="textFields" class="textFieldsRow">
+      <input type="text" id="headingText" placeholder="Heading likhein..." value="YOUR HEADING HERE">
+      <input type="text" id="subheadingText" placeholder="Subheading (optional)" value="">
+      <label style="margin-top:8px;">Position
+        <select id="textPos" style="width:60%;">
+          <option value="bl">Bottom Left</option>
+          <option value="bc">Bottom Center</option>
+          <option value="br">Bottom Right</option>
+          <option value="ml" selected>Middle Left</option>
+          <option value="mc">Middle Center</option>
+          <option value="mr">Middle Right</option>
+          <option value="tl">Top Left</option>
+          <option value="tc">Top Center</option>
+          <option value="tr">Top Right</option>
+        </select>
+      </label>
+      <label>Heading size <span class="val" id="headingSizeVal">90</span></label>
+      <input type="range" id="headingSize" min="30" max="220" value="90" step="5">
+      <label>Letter spacing <span class="val" id="letterSpacingVal">2</span></label>
+      <input type="range" id="letterSpacing" min="0" max="20" value="2" step="1">
+      <label>Text color <input type="color" id="textColor" value="#ffffff"></label>
+    </div>
+  </div>
+
+  <div class="dl-row">
+    <button id="dlPngBtn">⬇ PNG</button>
+    <button id="dlJpgBtn">⬇ JPG</button>
+    <button id="dlSvgBtn">⬇ SVG (Illustrator-safe)</button>
+  </div>
+  <div class="dl-row">
+    <button id="dlGrainBtn">⬇ Grain Texture (PNG)</button>
+  </div>
+  <div class="hint">Grain Texture PNG ko "Fix-GrainGlow-Batch" Illustrator script ke sath use karein — wahi script SVG/EPS mein sahi z-order aur smooth grain dono fix kar degi.</div>
+</div>
+
+<div id="main">
+  <div id="canvasWrap">
+    <canvas id="canvas"></canvas>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════
+// UTILITIES
+// ══════════════════════════════════════════════════
+function mulberry32(a){
+  return function(){
+    a|=0; a=a+0x6D2B79F5|0;
+    let t=Math.imul(a^a>>>15,1|a);
+    t=t+Math.imul(t^t>>>7,61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+}
+function hsl2hex(h,s,l){
+  s/=100;l/=100;
+  const a=s*Math.min(l,1-l);
+  const f=n=>{const k=(n+h/30)%12;const col=l-a*Math.max(Math.min(k-3,9-k,1),-1);return Math.round(255*col).toString(16).padStart(2,'0');};
+  return`#${f(0)}${f(8)}${f(4)}`;
+}
+function hexToRgbArr(hex){
+  const r=/^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return r ? [parseInt(r[1],16),parseInt(r[2],16),parseInt(r[3],16)] : [255,255,255];
+}
+function rgbArrToHex(rgb){
+  return '#'+rgb.map(v=>Math.round(Math.max(0,Math.min(255,v))).toString(16).padStart(2,'0')).join('');
+}
+// Illustrator/EPS can't do the "screen" blend trick our canvas glow uses, so
+// for the SVG/vector export we compensate by lifting each colour toward
+// white a little (brighter, slightly desaturated) so the glow still reads
+// correctly under plain, standards-safe alpha compositing.
+function liftColorForSVG(hex, amt){
+  const c=hexToRgbArr(hex);
+  const lifted=c.map(v=>v+(255-v)*amt);
+  return rgbArrToHex(lifted);
+}
+function bgD(pts, closed){
+  if(pts.length<2) return '';
+  const n=pts.length;
+  let d = `M ${pts[0].x.toFixed(2)} ${pts[0].y.toFixed(2)} `;
+  for(let i=1;i<n-1;i++){
+    const mx=(pts[i].x+pts[i+1].x)/2, my=(pts[i].y+pts[i+1].y)/2;
+    d += `Q ${pts[i].x.toFixed(2)} ${pts[i].y.toFixed(2)} ${mx.toFixed(2)} ${my.toFixed(2)} `;
+  }
+  d += `L ${pts[n-1].x.toFixed(2)} ${pts[n-1].y.toFixed(2)} `;
+  if(closed) d += 'Z';
+  return d;
+}
+
+// ══════════════════════════════════════════════════
+// GLOW / FEATHER RENDERING (layered blur = soft creamy falloff)
+// ══════════════════════════════════════════════════
+// ✅ FIX: the old version also multiplied stroke WIDTH per layer (2.6x,
+// 1.8x, 1.2x...) — that created hard geometric edges at each layer's own
+// width, and blur wasn't always large enough to hide the jump between
+// them, so it rendered as visible concentric RINGS instead of one smooth
+// glow. Now every layer uses the SAME width; only blur radius and opacity
+// change, on a smooth curve — blur alone spreads the glow outward, so
+// there's no hard edge anywhere to create a ring.
+const FEATHER_LAYERS=[
+  {blur:1.00, alpha:0.24},
+  {blur:0.62, alpha:0.32},
+  {blur:0.36, alpha:0.44},
+  {blur:0.20, alpha:0.60},
+  {blur:0.09, alpha:0.80},
+  {blur:0.02, alpha:1.00},
+];
+function layeredGlowStroke(ctx, d, color, baseWidth, M, featherMul, brightMul){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  ctx.lineCap='round'; ctx.lineJoin='round';
+  ctx.lineWidth=baseWidth*M;
+  const path=new Path2D(d);
+  const maxBlurPx = baseWidth*3.6*featherMul*M;
+  FEATHER_LAYERS.forEach(L=>{
+    ctx.filter = L.blur>0 ? `blur(${(maxBlurPx*L.blur).toFixed(1)}px)` : 'none';
+    ctx.globalAlpha=Math.min(1, L.alpha*brightMul);
+    ctx.strokeStyle=color;
+    ctx.stroke(path);
+  });
+  ctx.restore();
+}
+function layeredGlowFill(ctx, cx, cy, R, color, M, featherMul, brightMul){
+  ctx.save();
+  ctx.globalCompositeOperation='lighter';
+  const maxBlurPx = R*1.3*featherMul*M;
+  FEATHER_LAYERS.forEach(L=>{
+    ctx.filter = L.blur>0 ? `blur(${(maxBlurPx*L.blur).toFixed(1)}px)` : 'none';
+    ctx.globalAlpha=Math.min(1, L.alpha*brightMul);
+    ctx.fillStyle=color;
+    ctx.beginPath(); ctx.arc(cx*M,cy*M,R*M,0,Math.PI*2); ctx.fill();
+  });
+  ctx.restore();
+}
+
+// ══════════════════════════════════════════════════
+// COMPOSITIONS
+// ══════════════════════════════════════════════════
+function compWaveStreak(ctx,W,H,M,colors,rng,glowSize,featherMul,brightMul){
+  const steps=40; const pts=[];
+  const amp=H*(0.15+rng()*0.14)*glowSize;
+  const baseY=H*(0.32+rng()*0.36);
+  const freq=0.8+rng()*0.5;
+  const phase=rng()*Math.PI*2;
+  for(let i=0;i<=steps;i++){
+    const t=i/steps;
+    const x=W*t;
+    const y=baseY+Math.sin(t*Math.PI*freq*2+phase)*amp;
+    pts.push({x:x*M,y:y*M});
+  }
+  const d=bgD(pts,false);
+  layeredGlowStroke(ctx,d,colors[0],H*0.15*glowSize,M,featherMul,brightMul);
+}
+function compRadialOrb(ctx,W,H,M,colors,rng,glowSize,featherMul,brightMul){
+  const cx=W*(0.25+rng()*0.5), cy=H*(0.25+rng()*0.5);
+  const R=Math.min(W,H)*(0.15+rng()*0.1)*glowSize;
+  layeredGlowFill(ctx,cx,cy,R,colors[0],M,featherMul,brightMul);
+}
+function compVerticalBeam(ctx,W,H,M,colors,rng,glowSize,featherMul,brightMul){
+  const x0=W*(0.2+rng()*0.6);
+  const tilt=(rng()-0.5)*W*0.6;
+  const pts=[{x:x0*M,y:-H*0.1*M},{x:(x0+tilt)*M,y:H*1.1*M}];
+  const d=bgD(pts,false);
+  layeredGlowStroke(ctx,d,colors[0],W*0.08*glowSize,M,featherMul,brightMul);
+}
+function compCornerGlow(ctx,W,H,M,colors,rng,glowSize,featherMul,brightMul){
+  const corners=[[0,0],[W,0],[0,H],[W,H]];
+  const c=corners[Math.floor(rng()*4)];
+  layeredGlowFill(ctx,c[0],c[1],Math.min(W,H)*0.5*glowSize,colors[0],M,featherMul,brightMul);
+}
+function compHorizonGlow(ctx,W,H,M,colors,rng,glowSize,featherMul,brightMul){
+  const y0=H*(0.35+rng()*0.3);
+  const pts=[];
+  for(let i=0;i<=20;i++){ const t=i/20; pts.push({x:W*t*M, y:(y0+Math.sin(t*Math.PI*1.4+rng()*3)*H*0.05)*M}); }
+  const d=bgD(pts,false);
+  layeredGlowStroke(ctx,d,colors[0],H*0.2*glowSize,M,featherMul,brightMul);
+}
+function compAuroraStrands(ctx,W,H,M,colors,rng,glowSize,featherMul,brightMul){
+  const n=3+Math.floor(rng()*2);
+  for(let s=0;s<n;s++){
+    const pts=[];
+    const baseY=H*(0.15+rng()*0.65);
+    const amp=H*(0.07+rng()*0.09)*glowSize;
+    const freq=1+rng()*1.2;
+    const phase=rng()*Math.PI*2;
+    for(let i=0;i<=30;i++){ const t=i/30; pts.push({x:W*t*M, y:(baseY+Math.sin(t*Math.PI*freq+phase)*amp)*M}); }
+    const d=bgD(pts,false);
+    const col=colors[s%colors.length];
+    layeredGlowStroke(ctx,d,col,H*0.045*glowSize,M,featherMul,brightMul);
+  }
+}
+const COMPOSITIONS={
+  waveStreak: compWaveStreak,
+  radialOrb: compRadialOrb,
+  verticalBeam: compVerticalBeam,
+  cornerGlow: compCornerGlow,
+  horizonGlow: compHorizonGlow,
+  auroraStrands: compAuroraStrands,
+};
+
+// ══════════════════════════════════════════════════
+// GRAIN
+// ══════════════════════════════════════════════════
+function generateGrainCanvas(gw, gh, rng){
+  gw=Math.max(1,Math.round(gw)); gh=Math.max(1,Math.round(gh));
+  const off=document.createElement('canvas');
+  off.width=gw; off.height=gh;
+  const octx=off.getContext('2d');
+  const imgData=octx.createImageData(gw,gh);
+  const data=imgData.data;
+  for(let i=0;i<data.length;i+=4){
+    const v=Math.floor(rng()*255);
+    data[i]=v; data[i+1]=v; data[i+2]=v; data[i+3]=255;
+  }
+  octx.putImageData(imgData,0,0);
+  return off;
+}
+function applyGrain(ctx,W,H,M,intensity,size,rng){
+  if(intensity<=0) return;
+  const grainCanvas=generateGrainCanvas(W*M/size, H*M/size, rng);
+  ctx.save();
+  ctx.globalCompositeOperation='overlay';
+  ctx.globalAlpha=intensity;
+  ctx.imageSmoothingEnabled=false;
+  ctx.drawImage(grainCanvas,0,0,W*M,H*M);
+  ctx.restore();
+}
+
+// ══════════════════════════════════════════════════
+// VIGNETTE
+// ══════════════════════════════════════════════════
+function drawVignette(ctx,W,H,M,strength){
+  if(strength<=0) return;
+  const grad=ctx.createRadialGradient(W/2*M,H/2*M,Math.min(W,H)*0.25*M, W/2*M,H/2*M,Math.max(W,H)*0.78*M);
+  grad.addColorStop(0,'rgba(0,0,0,0)');
+  grad.addColorStop(1,`rgba(0,0,0,${strength})`);
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,0,W*M,H*M);
+}
+
+// ══════════════════════════════════════════════════
+// TEXT OVERLAY
+// ══════════════════════════════════════════════════
+function drawTextOverlay(ctx,W,H,M,cfg){
+  if(!cfg.heading && !cfg.subheading) return;
+  ctx.save();
+  ctx.textBaseline='alphabetic';
+  const pad=W*0.07;
+  let x,align,y;
+  const pos=cfg.textPos;
+  if(pos[1]==='l'){ x=pad; align='left'; }
+  else if(pos[1]==='c'){ x=W/2; align='center'; }
+  else { x=W-pad; align='right'; }
+  if(pos[0]==='t'){ y=H*0.16; }
+  else if(pos[0]==='m'){ y=H*0.52; }
+  else { y=H*0.86; }
+
+  ctx.textAlign=align;
+  ctx.shadowColor='rgba(0,0,0,0.6)';
+  ctx.shadowBlur=W*0.012*M;
+  ctx.shadowOffsetY=W*0.002*M;
+  ctx.fillStyle=cfg.textColor;
+  ctx.font=`900 ${cfg.headingSize*M}px Arial, sans-serif`;
+  try{ ctx.letterSpacing=(cfg.letterSpacing*M)+'px'; }catch(e){}
+  if(cfg.heading) ctx.fillText(cfg.heading.toUpperCase(), x*M, y*M);
+
+  if(cfg.subheading){
+    ctx.font=`${cfg.headingSize*0.32*M}px Arial, sans-serif`;
+    try{ ctx.letterSpacing=(cfg.letterSpacing*0.6*M)+'px'; }catch(e){}
+    ctx.globalAlpha=0.85;
+    ctx.fillText(cfg.subheading, x*M, (y+cfg.headingSize*0.62)*M);
+    ctx.globalAlpha=1;
+  }
+  ctx.restore();
+}
+
+// ══════════════════════════════════════════════════
+// UI DATA
+// ══════════════════════════════════════════════════
+const COMP_OPTIONS=[
+  {k:'waveStreak',   l:'Wave Streak'},
+  {k:'radialOrb',    l:'Radial Orb'},
+  {k:'verticalBeam', l:'Vertical Beam'},
+  {k:'cornerGlow',   l:'Corner Glow'},
+  {k:'horizonGlow',  l:'Horizon Glow'},
+  {k:'auroraStrands',l:'Aurora Strands'},
+];
+const COLOR_SWATCHES=[
+  {name:'Ocean Blue', c:['#1fc8ff']},
+  {name:'Purple Haze', c:['#8b3dff']},
+  {name:'Hot Pink', c:['#ff2d95']},
+  {name:'Sunset Orange', c:['#ff7a33']},
+  {name:'Emerald', c:['#20e08a']},
+  {name:'Crimson', c:['#ff2d4d']},
+  {name:'Gold', c:['#ffcc33']},
+  {name:'Cyan', c:['#20e6e6']},
+  {name:'Blue-Purple Duo', c:['#1fc8ff','#8b3dff']},
+  {name:'Pink-Orange Duo', c:['#ff2d95','#ff7a33']},
+  {name:'Emerald-Cyan Duo', c:['#20e08a','#20e6e6']},
+  {name:'Ice White', c:['#eaf6ff']},
+];
+const SIZE_PRESETS={
+  wideBanner:{w:4200,h:1750}, ultraWide:{w:5000,h:1400},
+  land:{w:4500,h:3000}, sq3000:{w:3000,h:3000}, port:{w:3000,h:4500},
+};
+
+let selectedComp='waveStreak';
+let selectedSwatchColors=['#1fc8ff'];
+
+function buildCompPills(){
+  const wrap=document.getElementById('compPills');
+  COMP_OPTIONS.forEach(o=>{
+    const d=document.createElement('div');
+    d.className='ppill'+(selectedComp===o.k?' on':'');
+    d.textContent=o.l;
+    d.onclick=()=>{
+      selectedComp=o.k;
+      wrap.querySelectorAll('.ppill').forEach(x=>x.classList.remove('on'));
+      d.classList.add('on');
+    };
+    wrap.appendChild(d);
+  });
+}
+function buildColorSwatches(){
+  const wrap=document.getElementById('colorSwatches');
+  COLOR_SWATCHES.forEach((sw,i)=>{
+    const b=document.createElement('button');
+    b.type='button';
+    b.className='swatch'+(i===0?' on':'');
+    b.title=sw.name;
+    const bg = sw.c.length>1 ? `linear-gradient(135deg, ${sw.c[0]} 50%, ${sw.c[1]} 50%)` : sw.c[0];
+    b.style.background=bg;
+    b.onclick=()=>{
+      selectedSwatchColors=sw.c;
+      document.getElementById('customColor1').value=sw.c[0];
+      document.getElementById('customColor2').value=sw.c[1]||sw.c[0];
+      wrap.querySelectorAll('.swatch').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+    };
+    wrap.appendChild(b);
+  });
+}
+buildCompPills();
+buildColorSwatches();
+
+document.getElementById('sizePreset').addEventListener('change', function(){
+  document.getElementById('customSizeRow').style.display = this.value==='custom' ? 'block' : 'none';
+});
+document.getElementById('textOn').addEventListener('change', function(){
+  document.getElementById('textFields').classList.toggle('show', this.checked);
+});
+[['glowSize','%'],['feather','%'],['glowBright','%'],['grainIntensity','%'],['grainSize','px'],
+ ['vignetteStrength','%'],['headingSize',''],['letterSpacing','']].forEach(([id,suf])=>{
+  document.getElementById(id).addEventListener('input', function(){
+    document.getElementById(id+'Val').textContent=this.value+suf;
+  });
+});
+
+function readConfig(){
+  const sizeK=document.getElementById('sizePreset').value;
+  let W,H;
+  if(sizeK==='custom'){ W=Math.max(400,+document.getElementById('customW').value||4200); H=Math.max(400,+document.getElementById('customH').value||1750); }
+  else { const sp=SIZE_PRESETS[sizeK]; W=sp.w; H=sp.h; }
+  return {
+    W,H,
+    composition: selectedComp,
+    colors: [document.getElementById('customColor1').value, document.getElementById('customColor2').value],
+    randomColorEach: document.getElementById('randomColorEach').checked,
+    bgTop: document.getElementById('bgTop').value,
+    bgBottom: document.getElementById('bgBottom').value,
+    glowSize: (+document.getElementById('glowSize').value)/100,
+    feather: (+document.getElementById('feather').value)/100,
+    glowBright: (+document.getElementById('glowBright').value)/100,
+    grainIntensity: (+document.getElementById('grainIntensity').value)/100,
+    grainSize: +document.getElementById('grainSize').value,
+    vignetteOn: document.getElementById('vignetteOn').checked,
+    vignetteStrength: (+document.getElementById('vignetteStrength').value)/100,
+    textOn: document.getElementById('textOn').checked,
+    heading: document.getElementById('headingText').value,
+    subheading: document.getElementById('subheadingText').value,
+    textPos: document.getElementById('textPos').value,
+    headingSize: +document.getElementById('headingSize').value,
+    letterSpacing: +document.getElementById('letterSpacing').value,
+    textColor: document.getElementById('textColor').value,
+  };
+}
+
+// ══════════════════════════════════════════════════
+// MAIN GENERATE
+// ══════════════════════════════════════════════════
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+let currentSeed=0;
+let lastCfg=null;
+
+function generateAll(seed){
+  const btn=document.getElementById('generateBtn');
+  btn.disabled=true; btn.textContent='⏳ Generating...';
+
+  setTimeout(()=>{
+    currentSeed=(seed!==undefined)?seed:Math.floor(Math.random()*1e9);
+    document.getElementById('seedDisplay').textContent=currentSeed;
+
+    const cfg=readConfig();
+    const rng=mulberry32(currentSeed);
+
+    let colors=cfg.colors;
+    if(cfg.randomColorEach){
+      const h1=Math.floor(rng()*360);
+      const h2=(h1+40+Math.floor(rng()*70))%360;
+      colors=[hsl2hex(h1,85,58), hsl2hex(h2,85,58)];
+    }
+
+    canvas.width=cfg.W; canvas.height=cfg.H;
+    const M=1;
+
+    // 1. background
+    const bgGrad=ctx.createLinearGradient(0,0,0,cfg.H*M);
+    bgGrad.addColorStop(0, cfg.bgTop);
+    bgGrad.addColorStop(1, cfg.bgBottom);
+    ctx.fillStyle=bgGrad;
+    ctx.fillRect(0,0,cfg.W*M,cfg.H*M);
+
+    // 2. glow composition
+    const compFn=COMPOSITIONS[cfg.composition] || compWaveStreak;
+    compFn(ctx, cfg.W, cfg.H, M, colors, rng, cfg.glowSize, cfg.feather, cfg.glowBright);
+
+    // 3. vignette
+    if(cfg.vignetteOn) drawVignette(ctx, cfg.W, cfg.H, M, cfg.vignetteStrength);
+
+    // 4. grain
+    applyGrain(ctx, cfg.W, cfg.H, M, cfg.grainIntensity, cfg.grainSize, rng);
+
+    // 5. text
+    if(cfg.textOn) drawTextOverlay(ctx, cfg.W, cfg.H, M, cfg);
+
+    lastCfg={...cfg, colors, seed:currentSeed};
+    btn.disabled=false; btn.textContent='🎲 Generate New Design';
+  }, 20);
+}
+
+// ══════════════════════════════════════════════════
+// SVG EXPORT (feTurbulence grain + layered blur glow)
+// ══════════════════════════════════════════════════
+function buildSVG(){
+  if(!lastCfg) return '';
+  const cfg=lastCfg;
+  const W=cfg.W, H=cfg.H;
+  const rng=mulberry32(cfg.seed);
+  const colors=cfg.colors;
+
+  let defs=`<linearGradient id="bgGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="${cfg.bgTop}"/><stop offset="1" stop-color="${cfg.bgBottom}"/>
+  </linearGradient>`;
+
+  let body=`<rect x="0" y="0" width="${W}" height="${H}" fill="url(#bgGrad)"/>`;
+
+  // ✅ No mix-blend-mode here (Illustrator's SVG import does not reliably
+  // support CSS blend modes — that was why the glow used to vanish/turn
+  // into a flat block and the plain background ended up looking like it
+  // was "on top"). Colours are lifted toward white per layer instead, so
+  // the same soft-to-bright falloff still reads correctly under normal
+  // alpha compositing.
+  //
+  // ✅ Same width for every layer, only blur/opacity change on a smooth
+  // curve — this is what removes the visible concentric "rings" (the old
+  // version also scaled stroke width per layer, which created hard edges
+  // that blur couldn't fully hide).
+  function glowStrokeSVG(d, color, baseWidth){
+    let out='';
+    const maxBlurPx = baseWidth*3.6*cfg.feather;
+    FEATHER_LAYERS.forEach((L,i)=>{
+      const liftedColor = liftColorForSVG(color, 0.42-i*0.07);
+      const filterId=`featherS${i}`;
+      defs += `<filter id="${filterId}" filterUnits="userSpaceOnUse" x="${-W}" y="${-H}" width="${W*3}" height="${H*3}">${L.blur>0?`<feGaussianBlur stdDeviation="${(maxBlurPx*L.blur).toFixed(1)}"/>`:''}</filter>`;
+      out += `<path d="${d}" fill="none" stroke="${liftedColor}" stroke-width="${baseWidth.toFixed(1)}" stroke-linecap="round" filter="url(#${filterId})" opacity="${Math.min(1,(L.alpha*cfg.glowBright)+0.06).toFixed(2)}"/>`;
+    });
+    return out;
+  }
+  function glowFillSVG(cx,cy,R,color){
+    let out='';
+    const maxBlurPx = R*1.3*cfg.feather;
+    FEATHER_LAYERS.forEach((L,i)=>{
+      const liftedColor = liftColorForSVG(color, 0.42-i*0.07);
+      const filterId=`featherF${i}`;
+      defs += `<filter id="${filterId}" filterUnits="userSpaceOnUse" x="${-W}" y="${-H}" width="${W*3}" height="${H*3}">${L.blur>0?`<feGaussianBlur stdDeviation="${(maxBlurPx*L.blur).toFixed(1)}"/>`:''}</filter>`;
+      out += `<circle cx="${cx.toFixed(1)}" cy="${cy.toFixed(1)}" r="${R.toFixed(1)}" fill="${liftedColor}" filter="url(#${filterId})" opacity="${Math.min(1,(L.alpha*cfg.glowBright)+0.06).toFixed(2)}"/>`;
+    });
+    return out;
+  }
+
+  body += `<g>`;
+  if(cfg.composition==='radialOrb'){
+    const cx=W*(0.25+rng()*0.5), cy=H*(0.25+rng()*0.5);
+    const R=Math.min(W,H)*(0.15+rng()*0.1)*cfg.glowSize;
+    body += glowFillSVG(cx,cy,R,colors[0]);
+  } else if(cfg.composition==='cornerGlow'){
+    const corners=[[0,0],[W,0],[0,H],[W,H]];
+    const c=corners[Math.floor(rng()*4)];
+    body += glowFillSVG(c[0],c[1],Math.min(W,H)*0.5*cfg.glowSize,colors[0]);
+  } else if(cfg.composition==='auroraStrands'){
+    const n=3+Math.floor(rng()*2);
+    const baseW=H*0.045*cfg.glowSize;
+    for(let s=0;s<n;s++){
+      const pts=[]; const baseY=H*(0.15+rng()*0.65); const amp=H*(0.07+rng()*0.09)*cfg.glowSize;
+      const freq=1+rng()*1.2, phase=rng()*Math.PI*2;
+      for(let i=0;i<=30;i++){ const t=i/30; pts.push({x:W*t, y:baseY+Math.sin(t*Math.PI*freq+phase)*amp}); }
+      body += glowStrokeSVG(bgD(pts,false), colors[s%colors.length], baseW);
+    }
+  } else {
+    let pts=[]; let baseW;
+    if(cfg.composition==='verticalBeam'){
+      const x0=W*(0.2+rng()*0.6), tilt=(rng()-0.5)*W*0.6;
+      pts=[{x:x0,y:-H*0.1},{x:x0+tilt,y:H*1.1}];
+      baseW=W*0.08*cfg.glowSize;
+    } else if(cfg.composition==='horizonGlow'){
+      const y0=H*(0.35+rng()*0.3);
+      for(let i=0;i<=20;i++){ const t=i/20; pts.push({x:W*t, y:y0+Math.sin(t*Math.PI*1.4+rng()*3)*H*0.05}); }
+      baseW=H*0.2*cfg.glowSize;
+    } else {
+      const amp=H*(0.15+rng()*0.14)*cfg.glowSize, baseY=H*(0.32+rng()*0.36), freq=0.8+rng()*0.5, phase=rng()*Math.PI*2;
+      for(let i=0;i<=40;i++){ const t=i/40; pts.push({x:W*t, y:baseY+Math.sin(t*Math.PI*freq*2+phase)*amp}); }
+      baseW=H*0.15*cfg.glowSize;
+    }
+    body += glowStrokeSVG(bgD(pts,false), colors[0], baseW);
+  }
+  body += `</g>`;
+
+  if(cfg.vignetteOn){
+    defs += `<radialGradient id="vig" cx="50%" cy="50%" r="75%">
+      <stop offset="0" stop-color="#000" stop-opacity="0"/>
+      <stop offset="1" stop-color="#000" stop-opacity="${cfg.vignetteStrength}"/>
+    </radialGradient>`;
+    body += `<rect x="0" y="0" width="${W}" height="${H}" fill="url(#vig)"/>`;
+  }
+
+  // ✅ Vector-safe grain: feTurbulence (the old approach) is essentially
+  // unsupported in Illustrator and just disappears on import. Real pixel
+  // grain isn't something a vector file can represent anyway — so instead
+  // we scatter a capped number of tiny plain circles, which every SVG/EPS
+  // reader (including Illustrator) renders reliably. The PNG export still
+  // uses true per-pixel noise for the finest grain.
+  if(cfg.grainIntensity>0){
+    const grainColor = '#ffffff';
+    const dotCount = Math.min(9000, Math.round((W*H)/9000) * cfg.grainSize);
+    let dots='';
+    for(let i=0;i<dotCount;i++){
+      const gx=rng()*W, gy=rng()*H;
+      const r=0.4+rng()*cfg.grainSize*0.9;
+      const op=(0.08+rng()*0.22)*cfg.grainIntensity;
+      dots += `<circle cx="${gx.toFixed(1)}" cy="${gy.toFixed(1)}" r="${r.toFixed(2)}" fill="${grainColor}" opacity="${op.toFixed(2)}"/>`;
+    }
+    body += `<g>${dots}</g>`;
+  }
+
+  if(cfg.textOn && (cfg.heading||cfg.subheading)){
+    const pad=W*0.07;
+    let x,anchor,y;
+    const pos=cfg.textPos;
+    if(pos[1]==='l'){ x=pad; anchor='start'; } else if(pos[1]==='c'){ x=W/2; anchor='middle'; } else { x=W-pad; anchor='end'; }
+    if(pos[0]==='t'){ y=H*0.16; } else if(pos[0]==='m'){ y=H*0.52; } else { y=H*0.86; }
+    if(cfg.heading){
+      body += `<text x="${x.toFixed(1)}" y="${y.toFixed(1)}" text-anchor="${anchor}" font-family="Arial, Helvetica, sans-serif" font-size="${cfg.headingSize}" font-weight="900" letter-spacing="${cfg.letterSpacing}" fill="${cfg.textColor}">${esc(cfg.heading.toUpperCase())}</text>`;
+    }
+    if(cfg.subheading){
+      body += `<text x="${x.toFixed(1)}" y="${(y+cfg.headingSize*0.62).toFixed(1)}" text-anchor="${anchor}" font-family="Arial, Helvetica, sans-serif" font-size="${(cfg.headingSize*0.32).toFixed(1)}" letter-spacing="${(cfg.letterSpacing*0.6).toFixed(1)}" fill="${cfg.textColor}" opacity="0.85">${esc(cfg.subheading)}</text>`;
+    }
+  }
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${defs}${body}</svg>`;
+}
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+document.getElementById('generateBtn').addEventListener('click', ()=>generateAll());
+document.getElementById('dlPngBtn').addEventListener('click', ()=>{
+  canvas.toBlob(blob=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`grain-glow-${currentSeed}.png`;
+    a.click();
+  }, 'image/png');
+});
+document.getElementById('dlJpgBtn').addEventListener('click', ()=>{
+  canvas.toBlob(blob=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`grain-glow-${currentSeed}.jpg`;
+    a.click();
+  }, 'image/jpeg', 0.92);
+});
+document.getElementById('dlSvgBtn').addEventListener('click', ()=>{
+  const svg=buildSVG();
+  const blob=new Blob([svg], {type:'image/svg+xml'});
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=`grain-glow-${currentSeed}.svg`;
+  a.click();
+});
+document.getElementById('dlGrainBtn').addEventListener('click', ()=>{
+  if(!lastCfg){ return; }
+  const rng=mulberry32(lastCfg.seed + 777);
+  // full-contrast noise at the working resolution set by "Grain size", then
+  // scaled up to the full canvas without smoothing - same texture the PNG
+  // preview uses, exported on its own so it can be placed as a separate
+  // Overlay layer in Illustrator (see Fix-GrainGlow-Batch.jsx)
+  const small=generateGrainCanvas(lastCfg.W/lastCfg.grainSize, lastCfg.H/lastCfg.grainSize, rng);
+  const out=document.createElement('canvas');
+  out.width=lastCfg.W; out.height=lastCfg.H;
+  const octx=out.getContext('2d');
+  octx.imageSmoothingEnabled=false;
+  octx.drawImage(small,0,0,lastCfg.W,lastCfg.H);
+  out.toBlob(blob=>{
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`grain-texture-${currentSeed}-opacity${Math.round(lastCfg.grainIntensity*100)}.png`;
+    a.click();
+  }, 'image/png');
+});
+
+generateAll(Math.floor(Math.random()*1e9));
+</script>
+</body>
+</html>
